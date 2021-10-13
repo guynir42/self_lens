@@ -8,8 +8,8 @@ import transfer_matrix
 
 def test_matrix_source_radius(matrix):
     # get a reference radial curve from direct calculation:
-    # source_radii = [0.5, 1.0, 1.5]
-    source_radii = [1.2]
+    source_radii = [0.5, 1.0, 1.5]
+    # source_radii = [1.2]
     d = matrix.distances
     f1 = np.zeros((len(source_radii), d.size))
     f2 = np.zeros((len(source_radii), d.size))
@@ -25,11 +25,15 @@ def test_matrix_source_radius(matrix):
         plt.plot(d, f2[i, :], '-o', label=f'source radius= {sr} (matrix)')
         plt.plot(d, f1[i, :], '-x', label=f'source radius= {sr} (direct)')
 
+    assert np.all(abs(f1-f2) < 0.01)  # maintain precision to within 1%
 
     plt.legend()
-    plt.show(block=True)
+    # plt.show(block=True)
 
 
+def test_magnification_analytic_solution(matrix):
+    # refer to: https://academic.oup.com/mnras/article/411/3/1863/972908
+    pass
 
 def test_matrix_interpolation(matrix):
     pass

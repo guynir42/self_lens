@@ -188,15 +188,12 @@ class TransferMatrix:
 
             for j, source_radius in enumerate(self.source_radii):
 
-                # when lens distance and source radius are the same,
-                # use the previously calculated contour
-                if d != source_radius:
-                    (z1x, z1y, z2x, z2y) = draw_contours(
-                        d,
-                        source_radius,
-                        points=self.num_points,
+                (z1x, z1y, z2x, z2y) = draw_contours(
+                    d,
+                    source_radius,
+                    points=self.num_points,
 
-                    )
+                )
                 (im, x_grid, y_grid) = make_surface(
                     d,
                     source_radius,
@@ -255,12 +252,6 @@ class TransferMatrix:
                         plt.show()
                         plt.pause(0.0001)
 
-                    # keep only the values from the annulus, not the entire disk
-                    # if j > 0:
-                    #     self.input_flux[j] -= self.input_flux[j - 1]
-                    #     self.flux[k, j, i] -= self.flux[k, j - 1, i]
-                    #     self.moment[k, j, i] -= self.moment[k, j - 1, i]
-
             t1 = timer()
             self.calc_time = t1 - t0
 
@@ -281,7 +272,6 @@ class TransferMatrix:
         self, source=3, distances=None, occulter_radius=0, get_offsets=False
     ):
         """
-
         :param source:
             Give the size of the source,
             or a brightness profile (array or StarProfile object)
@@ -342,7 +332,9 @@ class TransferMatrix:
         # by the surface area of the annulus
         dr = np.diff(self.source_radii)
         dr = np.append(dr, dr[-1])
-        area = 2 * np.pi * self.source_radii * dr
+        # area = 2 * np.pi * self.source_radii * dr
+        area = np.pi * self.source_radii ** 2
+        area = np.diff(area, prepend=0)  # get the annulus area
         area = np.expand_dims(area, axis=[0, 2])
         star_profile *= area  # the flux from each annulus scaled to the area
 
@@ -484,10 +476,6 @@ def draw_contours(distance, source_radius, points=1e4, plotting=False):
 
     """
     epsilon = np.abs(distance - source_radius)
-    # if epsilon == 0:
-    #     raise ValueError(
-    #         "Cannot find the contours for exact match distance==source_radius"
-    #     )
 
     if epsilon < 0.3:
         th1 = (
@@ -520,9 +508,22 @@ def draw_contours(distance, source_radius, points=1e4, plotting=False):
     z2x = factor * ux
     z2y = factor * uy
 
+    # handle cases very close to zero by
+    # adding a contour along one side of the lens
+    # for each image, either internally or externally
+    if epsilon < 0.001:
+        th_right = np.linspace(-1, 1, int(np.ceil(points / 2)), endpoint=False) * np.pi / 2
+        flip = 1
+        if distance < source_radius:
+            flip = -1
+        z1x = np.append(z1x, -flip*np.cos(th_right))
+        z1y = np.append(z1y, np.sin(th_right))
+        z2x = np.append(z2x, flip*np.cos(th_right))
+        z2y = np.append(z2y, np.sin(th_right))
+
     if plotting:
-        plt.plot(z1x, z1y, "-", label="small image")
-        plt.plot(z2x, z2y, "-", label="large image")
+        plt.plot(z1x, z1y, "*", label="small image")
+        plt.plot(z2x, z2y, "*", label="large image")
 
         lx = np.cos(th)
         ly = np.sin(th)
@@ -634,64 +635,60 @@ def single_geometry(
     plotting=False,
 ):
 
-    if distance == source_radius and False:
-        mag = np.NAN
-        offset = np.NAN
-    else:
-        (z1x, z1y, z2x, z2y) = draw_contours(distance, source_radius, points=circle_points)
+    (z1x, z1y, z2x, z2y) = draw_contours(distance, source_radius, points=circle_points)
 
-        (im, x_grid, y_grid) = make_surface(distance, source_radius, z1x, z1y, z2x, z2y, resolution)
+    (im, x_grid, y_grid) = make_surface(distance, source_radius, z1x, z1y, z2x, z2y, resolution)
+
+    if occulter_radius > 0:
+        im2 = remove_occulter(im, occulter_radius, x_grid, y_grid)
+    else:
+        im2 = im
+
+    mag = np.sum(im2)
+    offset = np.sum(im2 * (x_grid - distance)) / mag
+    mag /= np.pi * source_radius ** 2 * resolution ** 2
+
+    if plotting:
+        plt.ion()
+        plt.cla()
+        plt.imshow(
+            im2,
+            vmin=0,
+            vmax=1,
+            extent=(
+                np.min(x_grid),
+                np.max(x_grid),
+                np.min(y_grid),
+                np.max(y_grid),
+            ),
+        )
+
+        x = np.cos(np.linspace(0, 2 * np.pi))
+        y = np.sin(np.linspace(0, 2 * np.pi))
+
+        plt.plot(x, y, "--r", label="lens")
+
+        x2 = source_radius * np.cos(np.linspace(0, 2 * np.pi)) + distance
+        y2 = source_radius * np.sin(np.linspace(0, 2 * np.pi))
+        plt.plot(x2, y2, ":g", label="source radius")
 
         if occulter_radius > 0:
-            im2 = remove_occulter(im, occulter_radius, x_grid, y_grid)
-        else:
-            im2 = im
+            x3 = occulter_radius * np.cos(np.linspace(0, 2 * np.pi))
+            y3 = occulter_radius * np.sin(np.linspace(0, 2 * np.pi))
+            plt.plot(x3, y3, ":g", label="occulter")
 
-        mag = np.sum(im2)
-        offset = np.sum(im2 * (x_grid - distance)) / mag
-        mag /= np.pi * source_radius ** 2 * resolution ** 2
+        plt.plot(distance, 0, "go", label="source center")
+        plt.plot(distance + offset, 0, "r+", label="center of light")
 
-        if plotting:
-            plt.ion()
-            plt.cla()
-            plt.imshow(
-                im2,
-                vmin=0,
-                vmax=1,
-                extent=(
-                    np.min(x_grid),
-                    np.max(x_grid),
-                    np.min(y_grid),
-                    np.max(y_grid),
-                ),
-            )
-
-            x = np.cos(np.linspace(0, 2 * np.pi))
-            y = np.sin(np.linspace(0, 2 * np.pi))
-
-            plt.plot(x, y, "--r", label="lens")
-
-            x2 = source_radius * np.cos(np.linspace(0, 2 * np.pi)) + distance
-            y2 = source_radius * np.sin(np.linspace(0, 2 * np.pi))
-            plt.plot(x2, y2, ":g", label="source radius")
-
-            if occulter_radius > 0:
-                x3 = occulter_radius * np.cos(np.linspace(0, 2 * np.pi))
-                y3 = occulter_radius * np.sin(np.linspace(0, 2 * np.pi))
-                plt.plot(x3, y3, ":g", label="occulter")
-
-            plt.plot(distance, 0, "go", label="source center")
-            plt.plot(distance + offset, 0, "r+", label="center of light")
-
-            plt.xlabel(
-                f"d= {distance:.2f} | source r= {source_radius} | "
-                f"occulter r= {occulter_radius} | mag= {mag:.2f} | "
-                f"offset= {offset:.2f}"
-            )
-            plt.gca().set_aspect("equal")
-            plt.legend()
-            plt.show()
-            plt.pause(0.0001)
+        plt.xlabel(
+            f"d= {distance:.2f} | source r= {source_radius} | "
+            f"occulter r= {occulter_radius} | mag= {mag:.2f} | "
+            f"offset= {offset:.2f}"
+        )
+        plt.gca().set_aspect("equal")
+        plt.legend()
+        plt.show()
+        plt.pause(0.0001)
 
     if get_offsets:
         return mag, offset
@@ -718,42 +715,16 @@ def radial_lightcurve(
 
     for i, d in enumerate(distances):
 
-        if d == source_radius:
-            epsilon = np.median(np.diff(distances)) / 10
-            (mag_low, offset_low) = single_geometry(
-                source_radius,
-                d - epsilon,
-                occulter_radius,
-                circle_points,
-                resoution,
-                True,
-                verbosity,
-                plotting,
-            )
-            (mag_high, offset_high) = single_geometry(
-                source_radius,
-                d + epsilon,
-                occulter_radius,
-                circle_points,
-                resoution,
-                True,
-                verbosity,
-                plotting,
-            )
-            mag[i] = (mag_low + mag_high) / 2
-            offset[i] = (offset_low + offset_high) / 2
-
-        else:
-            (mag[i], offset[i]) = single_geometry(
-                source_radius,
-                d,
-                occulter_radius,
-                circle_points,
-                resoution,
-                True,
-                verbosity,
-                plotting,
-            )
+        (mag[i], offset[i]) = single_geometry(
+            source_radius,
+            d,
+            occulter_radius,
+            circle_points,
+            resoution,
+            True,
+            verbosity,
+            plotting,
+        )
 
         if verbosity > 0:
             print(
