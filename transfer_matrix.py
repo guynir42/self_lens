@@ -136,6 +136,12 @@ class TransferMatrix:
         self.timestamp = ''
         self.notes = ''
 
+    def update_notes(self):
+        self.notes = f'distances= {self.min_dist}-{self.max_dist} ({self.step_dist} step) | ' \
+                     f'source radii= {self.min_source}-{self.max_source} ({self.step_source} step) | ' \
+                     f'occulter radii= 0-{self.max_occulter} ({self.step_occulter} step) ' \
+                     f'| resolution= {self.resolution} | num points= {self.num_points}'
+
     def make_matrix(self, plotting=False):
         """
         Populate the matrix with the magnification and moment results for each value combination
@@ -164,10 +170,7 @@ class TransferMatrix:
             np.linspace(0, self.max_occulter, num_occulters, endpoint=True), 5,
         )
 
-        self.notes = f'distances= {self.min_dist}-{self.max_dist} ({self.step_dist} step) | ' \
-                     f'source radii= {self.min_source}-{self.max_source} ({self.step_source} step) | ' \
-                     f'occulter radii= 0-{self.max_occulter} ({self.step_occulter} step) ' \
-                     f'| resolution= {self.resolution} | num points= {self.num_points}'
+        self.update_notes()
 
         self.flux = np.zeros(
             (self.occulter_radii.size, self.source_radii.size, self.distances.size),
@@ -366,8 +369,8 @@ class TransferMatrix:
             mag = np.sum(mag * star_profile, axis=1)  # apply the source profile
             mag = mag[0, :]
 
-            if distances is not None:
-                mag = np.interp(d, self.distances, mag, right=1)
+        if distances is not None:
+            mag = np.interp(d, self.distances, mag, right=1)
 
         if not get_offsets:
             return mag
@@ -414,8 +417,102 @@ class TransferMatrix:
             setattr(self, k, A[k])
 
     def __add__(self, other):
-        pass  # TODO: need to finish this
 
+        if not self.complete or not other.complete:
+            raise ValueError("Both operands to addition of matrices are incomplete!")
+        elif not self.complete:
+            return other
+        elif not other.complete:
+            return self
+
+        # assume both matrices are filled with data
+        if not np.array_equal(self.source_radii, other.source_radii):
+            raise ValueError('Values for "source_radii" are inconsistent!')
+        if not np.array_equal(self.occulter_radii, other.occulter_radii):
+            raise ValueError('Values for "source_radii" are inconsistent!')
+        if not np.array_equal(self.input_flux, other.input_flux):
+            raise ValueError('Values for "source_radii" are inconsistent!')
+
+        new = TransferMatrix()
+
+        new.source_radii = self.source_radii
+        new.occulter_radii = self.occulter_radii
+
+        # if other has lower distances, add it first
+        if np.max(self.distances) > np.max(other.distances):
+            self, other = other, self
+
+        # if start and end points are the same, clip the last value
+        # to prevent redundancy
+        if self.distances[-1] == other.distances[0]:
+            end_idx = -2
+        else:
+            end_idx = -1
+
+        new.input_flux = self.input_flux
+        new.source_radii = self.source_radii
+        new.occulter_radii = self.occulter_radii
+
+        new.distances = np.append(self.distances[:end_idx], other.distances)
+        new.flux = np.append(self.flux[:, :, end_idx], other.flux, axis=2)
+        new.magnification = np.append(self.magnification[:,:,:end_idx], other.magnification, axis=2)
+        new.moment = np.append(self.moment[:, :, :end_idx], other.moment, axis=2)
+
+        new.min_dist = self.min_dist
+        new.max_dist = other.max_dist
+        new.step_dist = self.step_dist
+        if self.step_dist != other.step_dist:
+            new.step_dist = [self.step_dist, other.step_dist]
+
+        new.min_source = self.min_source
+        new.max_source = self.max_source
+        new.step_source = self.step_source
+
+        new.max_occulter = self.max_occulter
+        new.step_occulter = self.step_occulter
+
+        new.resolution = np.min(self.resolution, other.resolution)
+        new.num_points = np.min(self.num_points, other.num_points)
+        new.calc_time = np.max(self.calc_time, other.calc_time)
+        new.timestamp = np.max(self.timestamp, other.timestamp)
+
+        new.complete = True
+        new.update_notes()
+
+        return new
+
+    def dwindle_data(self):
+        """
+        Reduce memory of the saved data by getting rid of
+        every other row, column and page of the matrix outputs
+        "flux", "input_flux", "magnification" and "moment".
+        This will also remove every other value in the
+        1D arrays of "distances", "source_radii" and
+        "occulter_radii", and double the step sizes.
+
+        :return:
+        """
+        N = [int(np.floor(s / 2) * 2) for s in self.flux.shape]
+        self.flux = self.flux[:, 0:N[1]:2, :] + self.flux[:, 1::2, :]
+        self.flux = self.flux[0:N[0]:2, :, 0:N[2]:2]
+
+        self.input_flux = self.input_flux[0:N[1]:2] + self.input_flux[1::2]
+
+        self.moment = self.moment[:, 0:N[1]:2, :] + self.moment[:, 1::2, :]
+        self.moment = self.moment[0:N[0]:2, :, 0:N[2]:2]
+
+        # self.magnification = self.magnification[0:N[0]:2, 0:N[1]:2, 0:N[2]:2]
+        self.magnification = self.flux / np.expand_dims(self.input_flux, axis=[0, 2])
+
+        self.occulter_radii = self.occulter_radii[0:N[0]:2]
+        self.source_radii = (self.source_radii[0:N[1]:2] + self.source_radii[1::2]) / 2
+        self.distances = self.distances[0:N[2]:2]
+
+        self.step_dist *= 2
+        self.step_source *= 2
+        self.occulter_radii *= 2
+
+        self.update_notes()
 
 class StarProfile:
     def __init__(self, radii, profile="uniform", source_radius=1, **kwargs):
@@ -742,11 +839,17 @@ if __name__ == "__main__":
 
     T = TransferMatrix()
 
-    T.max_source = 2
-    T.max_dist = 3
-    T.max_occulter = 1
+    T.min_source = 0.1
+    T.max_source = 1
+    T.step_source = 0.05
+    T.max_dist = 5
+    T.step_dist = 0.1
+    T.max_occulter = 1.5
+    T.step_occulter = 0.05
 
-    # T.load("matrix.npz")
+    T.make_matrix()
+    T.save()
+    T.load("matrix.npz")
 
     # distance = 1.3
     # source_radius = 2.0
