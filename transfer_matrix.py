@@ -136,24 +136,8 @@ class TransferMatrix:
         self.timestamp = ''
         self.notes = ''
 
-    def update_notes(self):
-        self.notes = f'distances= {self.min_dist}-{self.max_dist} ({self.step_dist} step) | ' \
-                     f'source radii= {self.min_source}-{self.max_source} ({self.step_source} step) | ' \
-                     f'occulter radii= 0-{self.max_occulter} ({self.step_occulter} step) ' \
-                     f'| resolution= {self.resolution} | num points= {self.num_points}'
+    def update_axes(self):
 
-    def make_matrix(self, plotting=False):
-        """
-        Populate the matrix with the magnification and moment results for each value combination
-        in the distances, source_radii, and occulter_radii arrays.
-        Will calculate the result for each annulus on the source, up to the maximum source radii.
-        This function takes a long time to run (possibly hours).
-
-        :param plotting: if true, will produce a surface plot of the lensed geometry for each iteration
-        :return: None
-        """
-
-        print("calculating matrix! ")
         num_dist = int(np.round((self.max_dist - self.min_dist) / self.step_dist) + 1)
         self.distances = np.round(
             np.linspace(self.min_dist, self.max_dist, num_dist, endpoint=True), 5,
@@ -170,8 +154,7 @@ class TransferMatrix:
             np.linspace(0, self.max_occulter, num_occulters, endpoint=True), 5,
         )
 
-        self.update_notes()
-
+    def allocate_arrays(self):
         self.flux = np.zeros(
             (self.occulter_radii.size, self.source_radii.size, self.distances.size),
             dtype=np.single,
@@ -181,6 +164,31 @@ class TransferMatrix:
             (self.occulter_radii.size, self.source_radii.size, self.distances.size),
             dtype=np.single,
         )
+
+    def update_notes(self):
+        self.notes = f'distances= {self.min_dist}-{self.max_dist} ({self.step_dist} step) | ' \
+                     f'source radii= {self.min_source}-{self.max_source} ({self.step_source} step) | ' \
+                     f'occulter radii= 0-{self.max_occulter} ({self.step_occulter} step) ' \
+                     f'| resolution= {self.resolution} | num points= {self.num_points}'
+
+    def data_size(self):
+        return self.distances.size * self.source_radii.size *self.occulter_radii.size
+
+    def make_matrix(self, plotting=False):
+        """
+        Populate the matrix with the magnification and moment results for each value combination
+        in the distances, source_radii, and occulter_radii arrays.
+        Will calculate the result for each annulus on the source, up to the maximum source radii.
+        This function takes a long time to run (possibly hours).
+
+        :param plotting: if true, will produce a surface plot of the lensed geometry for each iteration
+        :return: None
+        """
+
+        print("calculating matrix! ")
+        self.update_axes()
+        self.update_notes()
+        self.allocate_arrays()
 
         if plotting:
             plt.ion()
@@ -407,6 +415,8 @@ class TransferMatrix:
             return mag, offsets
 
     def save(self, filename="matrix"):
+        if filename.endswith('.npz'):
+            filename = filename[:-4]
         np.savez_compressed(filename, **vars(self))
         with open(f'{filename}.txt', 'w') as text_file:
             text_file.write(self.notes)
@@ -414,11 +424,14 @@ class TransferMatrix:
     def load(self, filename):
         A = np.load(filename)
         for k in vars(self).keys():
-            setattr(self, k, A[k])
+            val = A[k]
+            if val.ndim == 0:
+                val = val.item()
+            setattr(self, k, val)
 
     def __add__(self, other):
 
-        if not self.complete or not other.complete:
+        if not self.complete and not other.complete:
             raise ValueError("Both operands to addition of matrices are incomplete!")
         elif not self.complete:
             return other
@@ -429,9 +442,9 @@ class TransferMatrix:
         if not np.array_equal(self.source_radii, other.source_radii):
             raise ValueError('Values for "source_radii" are inconsistent!')
         if not np.array_equal(self.occulter_radii, other.occulter_radii):
-            raise ValueError('Values for "source_radii" are inconsistent!')
+            raise ValueError('Values for "occulter_radii" are inconsistent!')
         if not np.array_equal(self.input_flux, other.input_flux):
-            raise ValueError('Values for "source_radii" are inconsistent!')
+            raise ValueError('Values for "input_flux" are inconsistent!')
 
         new = TransferMatrix()
 
@@ -445,17 +458,17 @@ class TransferMatrix:
         # if start and end points are the same, clip the last value
         # to prevent redundancy
         if self.distances[-1] == other.distances[0]:
-            end_idx = -2
+            end_idx = self.distances.size - 1
         else:
-            end_idx = -1
+            end_idx = self.distances.size
 
         new.input_flux = self.input_flux
         new.source_radii = self.source_radii
         new.occulter_radii = self.occulter_radii
 
         new.distances = np.append(self.distances[:end_idx], other.distances)
-        new.flux = np.append(self.flux[:, :, end_idx], other.flux, axis=2)
-        new.magnification = np.append(self.magnification[:,:,:end_idx], other.magnification, axis=2)
+        new.flux = np.append(self.flux[:, :, :end_idx], other.flux, axis=2)
+        new.magnification = np.append(self.magnification[:, :, :end_idx], other.magnification, axis=2)
         new.moment = np.append(self.moment[:, :, :end_idx], other.moment, axis=2)
 
         new.min_dist = self.min_dist
@@ -471,10 +484,10 @@ class TransferMatrix:
         new.max_occulter = self.max_occulter
         new.step_occulter = self.step_occulter
 
-        new.resolution = np.min(self.resolution, other.resolution)
-        new.num_points = np.min(self.num_points, other.num_points)
-        new.calc_time = np.max(self.calc_time, other.calc_time)
-        new.timestamp = np.max(self.timestamp, other.timestamp)
+        new.resolution = min(self.resolution, other.resolution)
+        new.num_points = min(self.num_points, other.num_points)
+        new.calc_time = max(self.calc_time, other.calc_time)
+        new.timestamp = max(self.timestamp, other.timestamp)
 
         new.complete = True
         new.update_notes()
@@ -837,19 +850,26 @@ def radial_lightcurve(
 
 if __name__ == "__main__":
 
-    T = TransferMatrix()
+    T1 = TransferMatrix()
+    T1.load('scripts/matrix_SR1.00_D0.0_D1.0.npz')
+    T2 = TransferMatrix()
+    T2.load('scripts/matrix_SR1.00_D1.0_D2.0.npz')
 
-    T.min_source = 0.1
-    T.max_source = 1
-    T.step_source = 0.05
-    T.max_dist = 5
-    T.step_dist = 0.1
-    T.max_occulter = 1.5
-    T.step_occulter = 0.05
+    T = T1 + T2
 
-    T.make_matrix()
-    T.save()
-    T.load("matrix.npz")
+    # T = TransferMatrix()
+    #
+    # T.min_source = 0.1
+    # T.max_source = 1
+    # T.step_source = 0.05
+    # T.max_dist = 5
+    # T.step_dist = 0.1
+    # T.max_occulter = 1.5
+    # T.step_occulter = 0.05
+
+    # T.make_matrix()
+    # T.save()
+    # T.load("matrix.npz")
 
     # distance = 1.3
     # source_radius = 2.0

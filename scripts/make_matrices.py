@@ -21,7 +21,7 @@ if len(sys.argv) > 2:
 if len(sys.argv) > 3:
     T.step_dist = float(sys.argv[3])
 
-filename = f'matrix_mxSR{T.max_source:.2f}_mnD{T.min_dist}_mxD{T.max_dist}.pyz'
+filename = f'matrix_SR{T.max_source:.2f}_D{T.min_dist}_D{T.max_dist}'
 
 T.make_matrix()
 T.save(filename)
