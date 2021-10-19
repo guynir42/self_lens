@@ -1,5 +1,7 @@
 # project specific stuff
 saved/
+scripts/*.npz
+scripts/*.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
