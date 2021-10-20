@@ -1,8 +1,11 @@
+import sys
+from os import path
 import pytest
 
 import numpy as np
 from timeit import default_timer as timer
 
+sys.path.append(path.dirname(path.abspath(__file__)))
 import transfer_matrix
 
 
@@ -10,6 +13,13 @@ import transfer_matrix
 def matrix():
     T = transfer_matrix.TransferMatrix()
     T.load('matrix.npz')
+    return T
+
+
+@pytest.fixture
+def matrix_high_res():
+    T = transfer_matrix.TransferMatrix()
+    T.load('saved/matrix_high_res.npz')
     return T
 
 

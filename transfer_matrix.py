@@ -319,6 +319,7 @@ class TransferMatrix:
 
         # figure out the stellar light profile
         N = self.flux.shape[1]  # number of source radii
+        frac = 1  # the relative weight between first and second profiles (if given!)
         if isinstance(source, StarProfile):
             star_profile = source.get_matrix()
         elif type(source) is np.ndarray:
@@ -331,8 +332,26 @@ class TransferMatrix:
         elif hasattr(source, "__len__") and len(source) == N:
             star_profile = np.expand_dims(np.array(source), axis=[0, 2])
         elif np.isscalar(source):
-            star_profile = np.zeros((1, N, 1))
-            star_profile[0, source >= self.source_radii, 0] = 1
+            if source < np.min(self.source_radii) or source > np.max(self.source_radii):
+                raise ValueError(
+                    f'Requested source size ({source}) '
+                    f'is out of range for this matrix ({np.min(self.source_radii)}-{np.max(self.source_radii)})'
+                )
+            # check if requested source radius is an exact match,
+            # if it isn't, need some interpolation
+            if np.any(source == self.source_radii):
+                star_profile = np.zeros((1, N, 1))
+                star_profile[:, source >= self.source_radii, :] = 1
+            else:
+                # index above the requested point
+                # (must interpolate btw idx and idx-1)
+                star_profile = np.zeros((2, N, 1))
+                star_profile[:, source >= self.source_radii, :] = 1
+
+                idx = np.argmax(self.source_radii > source)
+                star_profile[1, idx, :] = 1
+                frac = (source - self.source_radii[idx-1]) / (self.source_radii[idx] - self.source_radii[idx-1])
+
         else:
             raise TypeError(
                 'Must provide "source" input as a numeric scalar, '
@@ -341,15 +360,12 @@ class TransferMatrix:
 
         # multiply each profile's brightness
         # by the surface area of the annulus
-        dr = np.diff(self.source_radii)
-        dr = np.append(dr, dr[-1])
-        # area = 2 * np.pi * self.source_radii * dr
-        area = np.pi * self.source_radii ** 2
-        area = np.diff(area, prepend=0)  # get the annulus area
-        area = np.expand_dims(area, axis=[0, 2])
-        star_profile *= area  # the flux from each annulus scaled to the area
+        # area = np.pi * self.source_radii ** 2
+        # area = np.diff(area, prepend=0)  # get the annulus area
+        # area = np.expand_dims(area, axis=[0, 2])
+        # star_profile *= area  # the flux from each annulus scaled to the area
 
-        star_profile /= np.sum(star_profile)  # normalize to unity
+        star_profile /= np.sum(star_profile, axis=1, keepdims=True)  # normalize to unity
 
         if occulter_radius > np.max(self.occulter_radii):
             raise ValueError(
@@ -360,9 +376,42 @@ class TransferMatrix:
         occulter_idx = occulter_radius == self.occulter_radii
 
         if np.any(occulter_idx):
-            mag = self.magnification[occulter_idx, :, :]
-            mag = np.sum(mag * star_profile, axis=1)  # apply the source profile
-            mag = mag[0, :]
+            flux = self.flux[occulter_idx, :, :]
+            flux = np.sum(flux * star_profile, axis=1)  # apply the source profile
+            if flux.shape[0] > 1:
+                flux[0, :] *= 1 - frac
+                flux[1, :] *= frac
+                flux = np.sum(flux, axis=0)
+            else:
+                flux = flux[0, :]
+
+            flux_in = self.input_flux
+            flux_in = np.expand_dims(flux_in, axis=[0, 2])
+            flux_in = np.sum(flux_in * star_profile, axis=1)  # also for the input flux
+
+            if flux_in.shape[0] > 1:
+                flux_in[0, :] *= 1 - frac
+                flux_in[1, :] *= frac
+                flux_in = np.sum(flux_in, axis=0)
+            else:
+                flux_in = flux_in[0, :]
+
+            mag = flux / flux_in
+            # mag = mag[0, :]
+
+            # mag = self.magnification[occulter_idx, :, :]
+            # mag = np.sum(mag * star_profile, axis=1)  # apply the source profile
+            # mag = mag[0, :]   idx = np.argmax(self.occulter_radii < occulter_radius)
+
+            # x1 = self.occulter_radii[idx]
+            # x2 = self.occulter_radii[idx + 1]
+            # y1 = self.magnification[idx]
+            # y2 = self.magnification[idx + 1]
+            #
+            # # interpolate between the occulter radii above and below
+            # mag = y1 + ((occulter_radius - x1) / (x2 - x1)) * (y2 - y1)
+            # mag = np.sum(mag * star_profile, axis=1)  # apply the source profile
+            # mag = mag[0, :]
         else:
             # index of occulter radius below requested value
             idx = np.argmax(self.occulter_radii < occulter_radius)
