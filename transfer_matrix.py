@@ -428,6 +428,7 @@ class TransferMatrix:
 
         if distances is not None:
             mag = np.interp(d, self.distances, mag, right=1)
+            mag[d > self.max_dist] = point_source_approximation(d[d > self.max_dist])
 
         if not get_offsets:
             return mag
@@ -896,6 +897,11 @@ def radial_lightcurve(
     else:
         return mag
 
+def point_source_approximation(distances):
+
+    sq = np.sqrt(1 + 4 / distances ** 2)
+    return 0.5 * (sq + 1 / sq)
+
 
 if __name__ == "__main__":
 
@@ -905,6 +911,11 @@ if __name__ == "__main__":
     T2.load('scripts/matrix_SR1.00_D1.0_D2.0.npz')
 
     T = T1 + T2
+
+    d = np.linspace(0, 3, 50)
+    mag = T.radial_lightcurve(source=0.1, distances=d, occulter_radius=0)
+
+    plt.plot(d, mag)
 
     # T = TransferMatrix()
     #
