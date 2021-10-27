@@ -101,9 +101,8 @@ class TransferMatrix:
     """
 
     def __init__(self):
-        self.resolution = 1e2
         self.num_points = 1e5
-
+        self.num_pixels = 1e7
         self.min_dist = 0
         self.max_dist = 20
         self.step_dist = 0.1
@@ -168,8 +167,8 @@ class TransferMatrix:
     def update_notes(self):
         self.notes = f'distances= {self.min_dist}-{self.max_dist} ({self.step_dist} step) | ' \
                      f'source radii= {self.min_source}-{self.max_source} ({self.step_source} step) | ' \
-                     f'occulter radii= 0-{self.max_occulter} ({self.step_occulter} step) ' \
-                     f'| resolution= {self.resolution} | num points= {self.num_points}'
+                     f'occulter radii= 0-{self.max_occulter} ({self.step_occulter} step) | ' \
+                     f'num points= {self.num_points:.0f}'
 
     def data_size(self):
         return self.distances.size * self.source_radii.size *self.occulter_radii.size
@@ -193,7 +192,7 @@ class TransferMatrix:
         if plotting:
             plt.ion()
 
-        t0 = timer()
+        t1 = timer()
 
         for i, d in enumerate(self.distances):
 
@@ -205,69 +204,47 @@ class TransferMatrix:
                     points=self.num_points,
 
                 )
-                (im, x_grid, y_grid) = make_surface(
+                (im, x_grid, y_grid, resolution) = make_surface(
                     d,
                     source_radius,
                     z1x,
                     z1y,
                     z2x,
                     z2y,
-                    resolution=self.resolution,
+                    pixels=self.num_pixels,
                 )
 
+                r_squared_grid = x_grid ** 2 + y_grid ** 2
+
                 for k, occulter_radius in enumerate(self.occulter_radii):
-                    im2 = remove_occulter(im, occulter_radius, x_grid, y_grid)
+                    # t0 = timer()
+                    (im2, changed_flag) = remove_occulter(im, occulter_radius, r_squared_grid, return_changed_flag=True)
+                    # print(f'timer to remove occulter: {timer()-t0:.3f}s'); t0 = timer()
+
                     self.input_flux[j] = (
-                        np.pi * source_radius ** 2 * self.resolution ** 2
+                            np.pi * source_radius ** 2 * resolution ** 2
                     )
-                    self.flux[k, j, i] = np.sum(im2)
-                    self.moment[k, j, i] = np.sum(im2 * (x_grid - d))
+
+                    if k == 0 or changed_flag:  # must calculate sums
+
+                        self.flux[k, j, i] = np.sum(im2) * 2
+                        self.moment[k, j, i] = np.sum(im2 * (x_grid - d)) * 2
+
+                    else:
+                        self.flux[k, j, i] = self.flux[k - 1, j, i]
+                        self.moment[k, j, i] = self.moment[k - 1, j, i]
+
+                    # print(f'timer to calculate sums: {timer() - t0:.3f}s')
 
                     if plotting:
                         offset = self.moment[k, j, i] / self.flux[k, j, i]
-                        plt.cla()
-                        plt.imshow(
-                            im2,
-                            vmin=0,
-                            vmax=1,
-                            extent=(
-                                np.min(x_grid),
-                                np.max(x_grid),
-                                np.min(y_grid),
-                                np.max(y_grid),
-                            ),
-                        )
-                        x = np.cos(np.linspace(0, 2 * np.pi))
-                        y = np.sin(np.linspace(0, 2 * np.pi))
+                        mag = self.flux[k, j, i] / self.input_flux[j]
+                        plot_geometry(im2, x_grid, y_grid, source_radius, d, occulter_radius, mag, offset)
 
-                        plt.plot(x, y, "--r", label="lens")
-
-                        x2 = source_radius * np.cos(np.linspace(0, 2 * np.pi)) + d
-                        y2 = source_radius * np.sin(np.linspace(0, 2 * np.pi))
-                        plt.plot(x2, y2, ":b", label="source radius")
-
-                        if occulter_radius > 0:
-                            x3 = occulter_radius * np.cos(np.linspace(0, 2 * np.pi))
-                            y3 = occulter_radius * np.sin(np.linspace(0, 2 * np.pi))
-                            plt.plot(x3, y3, ":g", label="occulter")
-
-                        plt.plot(d, 0, "go", label="source center")
-                        plt.plot(d + offset, 0, "r+", label="center of light")
-
-                        plt.xlabel(
-                            f"d= {d:.2f} | source r= {source_radius} | occulter r= {occulter_radius} "
-                            f"| mag= {self.flux[k, j, i] / self.input_flux[j]:.2f} | moment= {offset:.2f}"
-                        )
-                        plt.gca().set_aspect("equal")
-                        plt.legend()
-                        plt.show()
-                        plt.pause(0.0001)
-
-            t1 = timer()
-            self.calc_time = t1 - t0
+            self.calc_time = timer() - t1
 
             print(
-                f"{i+1:3d}/{self.distances.size} | Distance= {d} | runtime = {t1-t0:.1f}s"
+                f"{i+1:3d}/{self.distances.size} | Distance= {d} | runtime = {self.calc_time:.1f}s"
             )
 
         self.flux = np.diff(self.flux, axis=1, prepend=0)
@@ -472,12 +449,18 @@ class TransferMatrix:
             text_file.write(self.notes)
 
     def load(self, filename):
-        A = np.load(filename)
+        A = np.load(filename, allow_pickle=True)
         for k in vars(self).keys():
             val = A[k]
             if val.ndim == 0:
                 val = val.item()
             setattr(self, k, val)
+
+    @classmethod
+    def from_file(cls, filename):
+        T = TransferMatrix()
+        T.load(filename)
+        return T
 
     def __add__(self, other):
 
@@ -534,7 +517,6 @@ class TransferMatrix:
         new.max_occulter = self.max_occulter
         new.step_occulter = self.step_occulter
 
-        new.resolution = min(self.resolution, other.resolution)
         new.num_points = min(self.num_points, other.num_points)
         new.calc_time = max(self.calc_time, other.calc_time)
         new.timestamp = max(self.timestamp, other.timestamp)
@@ -577,6 +559,7 @@ class TransferMatrix:
 
         self.update_notes()
 
+
 class StarProfile:
     def __init__(self, radii, profile="uniform", source_radius=1, **kwargs):
         self.radii = radii
@@ -595,7 +578,7 @@ class StarProfile:
         return np.expand_dims(self.values, axis=[0, 2])
 
 
-def draw_contours(distance, source_radius, points=1e4, plotting=False):
+def draw_contours(distance, source_radius, points=1e5, plotting=False):
     """
     Draw the contours of a lensed circular disk star,
     given a lens at a certain distance from the star.
@@ -705,37 +688,54 @@ def make_surface(
     z1y,
     z2x,
     z2y,
-    resolution,
+    pixels=1e6,
     plotting=False,
 ):
 
     internal = distance < source_radius
 
-    max_radius = max(1, source_radius)
-    # x axis spans the range from -(2*max_radius) to (distance + 4*max_radius)
-    width = int(np.ceil((6 * max_radius + distance) * resolution))
-    x_axis = np.linspace(
-        -2 * max_radius, 4 * max_radius + distance, width, endpoint=False
-    )
+    # extent of the required image, in Einstein units
+    left = min(np.min(z1x), np.min(z2x))
+    right = max(np.max(z1x), np.max(z2x))
+    top = max(np.max(z1y), np.max(z2y))
 
-    # y axis spans max_radius on either side
-    height = int(np.ceil(4 * max_radius * resolution))
-    y_axis = np.linspace(-2 * max_radius, 2 * max_radius, height, endpoint=False)
+    # print(f'left= {left}, right= {right}, top= {top}')
+
+    total_area = top * (right - left)
+    resolution = np.floor(np.sqrt(pixels/total_area))
+
+    # extent of the image in pixels
+    height = int(np.ceil(top * resolution) + 1)
+    width = int(np.ceil((right - left) * resolution) + 1)
+    origin_idx = int(np.ceil(-left * resolution))
+
+    # print(f'height= {height}, width= {width}, origin= {origin_idx}')
+
+    x_axis = np.linspace(left, right, width, endpoint=True)
+    y_axis = np.linspace(0, top, height, endpoint=True)
 
     im1 = np.zeros((height, width), dtype=bool)
     im2 = np.zeros((height, width), dtype=bool)
 
-    for i in range(z1x.size):
+    # print(f'time to allocate: {timer() - t0:.3f}s'); t0 = timer()
 
-        z1x_ind = int(np.round((z1x[i] - x_axis[0]) * resolution))
-        z1y_ind = int(np.round((z1y[i] - y_axis[0]) * resolution))
-        if 0 <= z1x_ind < width and 0 <= z1y_ind < height:
-            im1[z1y_ind, z1x_ind] = True
+    z1x_ind = np.round((z1x - left) * resolution).astype(int)
+    z1y_ind = np.round(z1y * resolution).astype(int)
+    good_indices = (z1x_ind >= 0) & (z1x_ind < width) & (z1y_ind >= 0) & (z1y_ind < height)
+    z1x_ind = z1x_ind[good_indices]
+    z1y_ind = z1y_ind[good_indices]
 
-        z2x_ind = int(np.round((z2x[i] - x_axis[0]) * resolution))
-        z2y_ind = int(np.round((z2y[i] - y_axis[0]) * resolution))
-        if 0 <= z2x_ind < width and 0 <= z2y_ind < height:
-            im2[z2y_ind, z2x_ind] = True
+    im1[z1y_ind, z1x_ind] = True
+
+    z2x_ind = np.round((z2x - left) * resolution).astype(int)
+    z2y_ind = np.round(z2y * resolution).astype(int)
+    good_indices = (z2x_ind >= 0) & (z2x_ind < width) & (z2y_ind >= 0) & (z2y_ind < height)
+    z2x_ind = z2x_ind[good_indices]
+    z2y_ind = z2y_ind[good_indices]
+
+    im2[z2y_ind, z2x_ind] = True
+
+    # print(f'time to loop over contours: {timer()-t0:.3f}s'); t0 = timer()
 
     for i in range(im1.shape[0]):
         indices = np.nonzero(im1[i])[0]  # where the contours are non-zero
@@ -751,13 +751,28 @@ def make_surface(
             mn = np.min(indices)
             im2[i, mn:mx] = True
 
-    im1 = ndimage.binary_closing(im1, border_value=0, iterations=2)
-    im2 = ndimage.binary_closing(im2, border_value=0, iterations=2)
+    if np.sum(np.diff(im2[:, 0])) > 4:
+        raise RuntimeError(f'Number of transitions ({np.sum(np.diff(im2[:, 0])) }) is too high. '
+                           f'Increase number of points on the circle. '
+                           f'distance= {distance}, source radius= {source_radius}')
+
+    # print(f'time to loop over height of images: {timer() - t0:.3f}s')
+
+    # t0 = timer()
+    #
+    # im1 = ndimage.binary_closing(im1, border_value=0, iterations=1)
+    # im2 = ndimage.binary_closing(im2, border_value=0, iterations=1)
+    #
+    # print(f'time to dilate/erode: {timer() - t0:.3f}s')
+
+    # t0 = timer()
 
     if internal:
         im = np.bitwise_xor(im1, im2)
     else:
         im = np.bitwise_or(im1, im2)
+
+    # print(f'time to subtract/add images: {timer() - t0:.3f}s')
 
     if plotting:
         plt.figure()
@@ -768,87 +783,54 @@ def make_surface(
     x_grid = np.repeat(np.expand_dims(x_axis, 0), y_axis.size, axis=0)
     y_grid = np.repeat(np.expand_dims(y_axis, 1), x_axis.size, axis=1)
 
-    return im, x_grid, y_grid
+    return im, x_grid, y_grid, resolution
 
 
-def remove_occulter(im, occulter_radius, x_grid, y_grid, plotting=False):
-    idx = (x_grid ** 2 + y_grid ** 2) < occulter_radius ** 2
+def remove_occulter(im, occulter_radius, r_squared_grid, plotting=False, return_changed_flag=False):
 
-    im_new = im
-    im_new[idx] = 0
+    idx = r_squared_grid[0, :] < occulter_radius ** 2
+    changed_flag = False
+    if np.any(im[0, idx]):
+        idx = r_squared_grid < occulter_radius ** 2
+        im[idx] = 0
+        changed_flag = True
 
     if plotting:
-        plt.imshow(im_new)
+        plt.imshow(im)
         plt.show()
 
-    return im_new
+    if return_changed_flag:
+        return im, changed_flag
+    else:
+        return im
 
 
 def single_geometry(
     source_radius,
     distance,
     occulter_radius=0,
-    circle_points=1e4,
-    resolution=1e2,
+    circle_points=1e5,
     get_offsets=False,
-    verbosity=0,
     plotting=False,
 ):
 
+    # t0 = timer()
     (z1x, z1y, z2x, z2y) = draw_contours(distance, source_radius, points=circle_points)
+    # print(f'time to draw contours: {timer() - t0:.3f}s')
 
-    (im, x_grid, y_grid) = make_surface(distance, source_radius, z1x, z1y, z2x, z2y, resolution)
+    (im, x_grid, y_grid, resolution) = make_surface(distance, source_radius, z1x, z1y, z2x, z2y)
 
     if occulter_radius > 0:
-        im2 = remove_occulter(im, occulter_radius, x_grid, y_grid)
+        im2 = remove_occulter(im, occulter_radius, x_grid ** 2 + y_grid ** 2)
     else:
         im2 = im
 
-    mag = np.sum(im2)
-    offset = np.sum(im2 * (x_grid - distance)) / mag
+    mag = np.sum(im2) * 2
+    offset = np.sum(im2 * (x_grid - distance)) * 2 / mag
     mag /= np.pi * source_radius ** 2 * resolution ** 2
 
     if plotting:
-        plt.ion()
-        plt.cla()
-        plt.imshow(
-            im2,
-            vmin=0,
-            vmax=1,
-            extent=(
-                np.min(x_grid),
-                np.max(x_grid),
-                np.min(y_grid),
-                np.max(y_grid),
-            ),
-        )
-
-        x = np.cos(np.linspace(0, 2 * np.pi))
-        y = np.sin(np.linspace(0, 2 * np.pi))
-
-        plt.plot(x, y, "--r", label="lens")
-
-        x2 = source_radius * np.cos(np.linspace(0, 2 * np.pi)) + distance
-        y2 = source_radius * np.sin(np.linspace(0, 2 * np.pi))
-        plt.plot(x2, y2, ":g", label="source radius")
-
-        if occulter_radius > 0:
-            x3 = occulter_radius * np.cos(np.linspace(0, 2 * np.pi))
-            y3 = occulter_radius * np.sin(np.linspace(0, 2 * np.pi))
-            plt.plot(x3, y3, ":g", label="occulter")
-
-        plt.plot(distance, 0, "go", label="source center")
-        plt.plot(distance + offset, 0, "r+", label="center of light")
-
-        plt.xlabel(
-            f"d= {distance:.2f} | source r= {source_radius} | "
-            f"occulter r= {occulter_radius} | mag= {mag:.2f} | "
-            f"offset= {offset:.2f}"
-        )
-        plt.gca().set_aspect("equal")
-        plt.legend()
-        plt.show()
-        plt.pause(0.0001)
+        plot_geometry(im2, x_grid, y_grid, source_radius, distance, occulter_radius, mag, offset)
 
     if get_offsets:
         return mag, offset
@@ -860,8 +842,7 @@ def radial_lightcurve(
     source_radius,
     distances=None,
     occulter_radius=0,
-    circle_points=1e4,
-    resoution=1e2,
+    circle_points=1e5,
     get_offsets=False,
     verbosity=0,
     plotting=False,
@@ -880,9 +861,7 @@ def radial_lightcurve(
             d,
             occulter_radius,
             circle_points,
-            resoution,
             True,
-            verbosity,
             plotting,
         )
 
@@ -897,6 +876,78 @@ def radial_lightcurve(
     else:
         return mag
 
+
+def plot_geometry(
+        im,
+        x_grid,
+        y_grid,
+        source_radius,
+        distance,
+        occulter_radius,
+        mag,
+        offset,
+        num_points=1e5,
+        pause_time=1e-3
+):
+    num_points = int(num_points)
+    im_left = np.min(x_grid)
+    im_right = np.max(x_grid)
+    im_bottom = -np.max(y_grid)
+    im_top = np.max(y_grid)
+    plt.ion()
+    plt.cla()
+    plt.imshow(
+        np.pad(np.concatenate((np.flip(im, axis=0), im), axis=0), 100),
+        vmin=0,
+        vmax=1,
+        extent=(
+            im_left,
+            im_right,
+            im_bottom,
+            im_top,
+        ),
+        origin="lower",
+    )
+
+    x = np.cos(np.linspace(0, 2 * np.pi, num_points))
+    y = np.sin(np.linspace(0, 2 * np.pi, num_points))
+    out_of_bounds = (im_left > x) | (x > im_right) | (im_bottom > y) | (y > im_top)
+    x[out_of_bounds] = np.NAN
+    y[out_of_bounds] = np.NAN
+
+    plt.plot(x, y, ":r", label="lens")
+
+    x2 = source_radius * np.cos(np.linspace(0, 2 * np.pi, num_points)) + distance
+    y2 = source_radius * np.sin(np.linspace(0, 2 * np.pi, num_points))
+
+    out_of_bounds = (im_left > x2) | (x2 > im_right) | (im_bottom > y2) | (y2 > im_top)
+    x2[out_of_bounds] = np.NAN
+    y2[out_of_bounds] = np.NAN
+
+    plt.plot(x2, y2, ":g", label="source radius")
+
+    if occulter_radius > 0:
+        x3 = occulter_radius * np.cos(np.linspace(0, 2 * np.pi, num_points))
+        y3 = occulter_radius * np.sin(np.linspace(0, 2 * np.pi, num_points))
+
+        out_of_bounds = (im_left > x3) | (x3 > im_right) | (im_bottom > y3) | (y3 > im_top)
+        x3[out_of_bounds] = np.NAN
+        y3[out_of_bounds] = np.NAN
+
+        plt.plot(x3, y3, ":m", label="occulter")
+
+    plt.plot(distance, 0, "go", label="source center")
+    plt.plot(distance + offset, 0, "r+", label="center of light")
+
+    plt.xlabel(
+        f"d= {distance:.2f} | source r= {source_radius} | occulter r= {occulter_radius} | "
+        f"mag= {mag:.2f} | offset= {offset:.2f}"
+    )
+    plt.gca().set_aspect("equal")
+    plt.legend(bbox_to_anchor=(0.0, 1.04), loc="lower left")
+    plt.show()
+    plt.pause(pause_time)
+
 def point_source_approximation(distances):
 
     sq = np.sqrt(1 + 4 / distances ** 2)
@@ -904,28 +955,17 @@ def point_source_approximation(distances):
 
 
 if __name__ == "__main__":
+    single_geometry(occulter_radius=0.4, source_radius=.01, plotting=True, distance=0.2, circle_points=1e5)
 
-    T1 = TransferMatrix()
-    T1.load('scripts/matrix_SR1.00_D0.0_D1.0.npz')
-    T2 = TransferMatrix()
-    T2.load('scripts/matrix_SR1.00_D1.0_D2.0.npz')
+    T = TransferMatrix()
 
-    T = T1 + T2
-
-    d = np.linspace(0, 3, 50)
-    mag = T.radial_lightcurve(source=0.1, distances=d, occulter_radius=0)
-
-    plt.plot(d, mag)
-
-    # T = TransferMatrix()
-    #
-    # T.min_source = 0.1
-    # T.max_source = 1
-    # T.step_source = 0.05
-    # T.max_dist = 5
-    # T.step_dist = 0.1
-    # T.max_occulter = 1.5
-    # T.step_occulter = 0.05
+    T.min_source = 0.01
+    T.max_source = 0.1
+    T.step_source = 0.005
+    T.max_dist = 0.01
+    T.step_dist = 0.005
+    T.max_occulter = 2.5
+    T.step_occulter = 0.005
 
     # T.make_matrix()
     # T.save()

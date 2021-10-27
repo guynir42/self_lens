@@ -1,4 +1,5 @@
 import re
+import glob
 import numpy as np
 import matplotlib.pyplot as plt
 from timeit import default_timer as timer
@@ -8,6 +9,15 @@ import transfer_matrix
 # TODO: add automatic white dwarf radius from https://github.com/mahollands/MR_relation
 # TODO: add automatic white dwarf radius from https://ui.adsabs.harvard.edu/abs/2002A%26A...394..489B/abstract eq (5)
 
+# Magnification of each image: https://microlensing-source.org/tutorial/magnification/
+# If requested source is smaller than smallest size in transfer matrices, use point approx.
+# Must check the occulter size, if it occults one or both images.
+# If distance is out of bounds, use point approx, fit to the smaller distances.
+# If occulter size is out of bounds, throw an exception (unphysical situation anyway).
+# Occulters should be produced to cover the full distances (for small sources)
+# Up to a few times the Einstein radius.
+# After that, it becomes unphysical to get a giant occulter (it becomes an eclipsing binary)
+# If source is too big, should use geometric approximation.
 
 class Simulator:
 
@@ -54,6 +64,18 @@ class Simulator:
         self.magnifications = None
         self.offset_sizes = None
         self.offset_angles = None
+
+    def load_matrices(self, filenames=None):
+
+        self.matrices = []
+
+        if filenames is None:
+            filenames = 'saved/*.npz'
+
+        filenames = glob.glob(filenames)
+
+        for f in filenames:
+            self.matrices.append(transfer_matrix.TransferMatrix.from_file(f))
 
     def translate_time_units(self, units):
         d = {'seconds': 1, 'minutes': 60, 'hours': 3600, 'days': 3600 * 24, 'years': 3600 * 24 * 365.25}
@@ -205,6 +227,8 @@ class Simulator:
             timestamps = np.linspace(-0.01 * self.orbital_period, 0.01 * self.orbital_period, 201, endpoint=True)
             self.input_timestamps(timestamps, 'hours')
 
+        # first check if the requested source size is lower/higher than any matrix
+
         matrix = self.choose_matrix()
 
         mag = matrix.radial_lightcurve(source=self.source_size,
@@ -220,13 +244,37 @@ class Simulator:
 
 
 if __name__ == "__main__":
-    t = transfer_matrix.TransferMatrix()
-    t.load('matrix.npz')
     s = Simulator()
-    s.matrices = [t]
+    s.load_matrices()
     s.calc_lightcurve(star_mass=0.4, lens_mass=4.0, lens_type='BH', inclination=89.5, semimajor_axis=0.01)
+    d = s.position_radii[::10]
+    mag1 = transfer_matrix.radial_lightcurve(
+        source_radius=s.source_size,
+        occulter_radius=s.occulter_size,
+        distances=d,
+        resoution=300,
+    )
+    mag2 = transfer_matrix.radial_lightcurve(
+        source_radius=s.source_size,
+        occulter_radius=s.occulter_size,
+        distances=d,
+        resoution=1000,
+    )
+    mag3 = transfer_matrix.radial_lightcurve(
+        source_radius=s.source_size,
+        occulter_radius=s.occulter_size,
+        distances=d,
+        resoution=2000,
+    )
 
-    plt.plot(s.timestamps, s.magnifications)
+    mag_ps = transfer_matrix.point_source_approximation(d)
+
+    plt.plot(s.position_radii, s.magnifications, '-*', label='matrix')
+    plt.plot(d, mag1, '-+', label='res= 300')
+    plt.plot(d, mag2, '-x', label='res= 1000')
+    plt.plot(d, mag3, '-o', label='res= 2000')
+    plt.plot(d, mag_ps, '-', label='point source')
     plt.xlabel(f'time [{s.time_units}]')
     plt.ylabel('magnification')
+    plt.legend()
     plt.show()
