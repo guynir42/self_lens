@@ -14,7 +14,7 @@ T.max_dist = 20.0
 T.step_dist = 0.1
 T.max_occulter = 10.0
 T.step_occulter = 0.1
-T.resolution = 100
+T.pixels = 1e7
 T.num_points = 1e6
 
 if len(sys.argv) > 2:

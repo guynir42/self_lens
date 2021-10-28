@@ -1,5 +1,5 @@
 import numpy as np
-from scipy import ndimage
+import copy
 import matplotlib.pyplot as plt
 from datetime import datetime
 from timeit import default_timer as timer
@@ -49,7 +49,7 @@ All units are normalized to the Einstein radius.
 class TransferMatrix:
     """
     The TransferMatrix is used to pre-calculate the magnification
-    and centroids offset for all combinations of source and occulter size,
+    and centroid offsets for all combinations of source and occulter size,
     for all distances, given the ranges (min/max values) given.
 
     Then the existing matrix is saved/loaded from disk, and
@@ -60,16 +60,15 @@ class TransferMatrix:
 
     The name TransferMatrix refers to the transformation of the
     light from each annulus on the source into the light seen
-    after it was lensed (i.e., magnified). The
+    after it was lensed (i.e., magnified).
 
     The data saved in the output arrays of the TransferMatrix
     is arranged into four arrays: "flux", "input_flux", "magnification"
-    and "moment". The input_flux is 1D and the rest are 3D, with
-    axis 0 for occulter radii, axis 1 for source radii, and
-    axis 2 for distances (between source and lens centers).
-    The "input_flux" dimension is only for the source radii,
-    and it specifies the surface area of each annulus (between
-    r_i and r_i+1) in units of number of pixels.
+    and "moment". These are 3D arrays, with axis 0 for occulter radii,
+    axis 1 for source radii, and axis 2 for distances
+    (between source and lens centers).
+    The "input_flux" specifies the surface area of each annulus
+    (between r_i and r_i+1) in units of Einsten radius squared.
     The "flux" array specifies the total surface area of each
     annulus in the source, after it was imaged by the lens
     (i.e., magnified). The different distances and occulter
@@ -81,7 +80,8 @@ class TransferMatrix:
     The "moment" array gives the center of light of each
     annulus, but without the normalization. This is because
     the normalization must come after integrating over all
-    the different annuli in the source surface.
+    the different annuli in the source surface,
+    with the correct weights given by the star profile.
     The moments can be summed over the different radii,
     and the "flux" array can be summed as well.
     Then their ratio gives the normalized offset
@@ -90,12 +90,11 @@ class TransferMatrix:
     USAGE: choose min/max/step for distances, source radii,
            and occulter radii. Call make_matrix() and wait.
            Once done, use save() to keep the matrix
-           for later use. Retreive the matrix from file
+           for later use. Retrieve the matrix from file
            using the load() function.
            Once ready, use radial_lightcurve() to produce
            a set of magnifications and offsets for a list
            of distances, interpolated from the existing data.
-
 
     All units are normalized to the Einstein radius.
     """
@@ -136,14 +135,13 @@ class TransferMatrix:
         self.notes = ''
 
     def update_axes(self):
-
+        """make the arrays for distances, source and occulter radii"""
         num_dist = int(np.round((self.max_dist - self.min_dist) / self.step_dist) + 1)
         self.distances = np.round(
             np.linspace(self.min_dist, self.max_dist, num_dist, endpoint=True), 5,
         )
 
         num_radii = int(np.round((self.max_source - self.min_source) / self.step_source) + 1)
-
         self.source_radii = np.round(
             np.linspace(self.min_source, self.max_source, num_radii, endpoint=True), 5
         )
@@ -154,24 +152,31 @@ class TransferMatrix:
         )
 
     def allocate_arrays(self):
+        """make the arrays used to store the flux, input_flux, magnification and moments. """
         self.flux = np.zeros(
             (self.occulter_radii.size, self.source_radii.size, self.distances.size),
             dtype=np.single,
         )
-        self.input_flux = np.zeros(self.source_radii.size, dtype=np.single)
+        self.input_flux = np.zeros(
+            (self.occulter_radii.size, self.source_radii.size, self.distances.size),
+            dtype=np.single
+        )
         self.moment = np.zeros(
             (self.occulter_radii.size, self.source_radii.size, self.distances.size),
             dtype=np.single,
         )
 
     def update_notes(self):
+        """make a string with the most important parameters for this matrix. """
         self.notes = f'distances= {self.min_dist}-{self.max_dist} ({self.step_dist} step) | ' \
                      f'source radii= {self.min_source}-{self.max_source} ({self.step_source} step) | ' \
                      f'occulter radii= 0-{self.max_occulter} ({self.step_occulter} step) | ' \
-                     f'num points= {self.num_points:.0f}'
+                     f'num pixels= {self.num_pixels:.0f} | num points= {self.num_points:.0f} | ' \
+                     f'calculation time= {self.calc_time:.1f}s'
 
     def data_size(self):
-        return self.distances.size * self.source_radii.size *self.occulter_radii.size
+        """get the number of data points in each of the data arrays. """
+        return self.distances.size * self.source_radii.size * self.occulter_radii.size
 
     def make_matrix(self, plotting=False):
         """
@@ -198,12 +203,8 @@ class TransferMatrix:
 
             for j, source_radius in enumerate(self.source_radii):
 
-                (z1x, z1y, z2x, z2y) = draw_contours(
-                    d,
-                    source_radius,
-                    points=self.num_points,
+                (z1x, z1y, z2x, z2y) = draw_contours(d, source_radius, points=self.num_points)
 
-                )
                 (im, x_grid, y_grid, resolution) = make_surface(
                     d,
                     source_radius,
@@ -221,14 +222,12 @@ class TransferMatrix:
                     (im2, changed_flag) = remove_occulter(im, occulter_radius, r_squared_grid, return_changed_flag=True)
                     # print(f'timer to remove occulter: {timer()-t0:.3f}s'); t0 = timer()
 
-                    self.input_flux[j] = (
-                            np.pi * source_radius ** 2 * resolution ** 2
-                    )
+                    self.input_flux[k, j, i] = np.pi * source_radius ** 2
 
                     if k == 0 or changed_flag:  # must calculate sums
 
-                        self.flux[k, j, i] = np.sum(im2) * 2
-                        self.moment[k, j, i] = np.sum(im2 * (x_grid - d)) * 2
+                        self.flux[k, j, i] = np.sum(im2) * 2 / resolution ** 2
+                        self.moment[k, j, i] = np.sum(im2 * (x_grid - d)) * 2 / resolution ** 2
 
                     else:
                         self.flux[k, j, i] = self.flux[k - 1, j, i]
@@ -238,7 +237,7 @@ class TransferMatrix:
 
                     if plotting:
                         offset = self.moment[k, j, i] / self.flux[k, j, i]
-                        mag = self.flux[k, j, i] / self.input_flux[j]
+                        mag = self.flux[k, j, i] / self.input_flux[k, j, i]
                         plot_geometry(im2, x_grid, y_grid, source_radius, d, occulter_radius, mag, offset)
 
             self.calc_time = timer() - t1
@@ -248,8 +247,8 @@ class TransferMatrix:
             )
 
         self.flux = np.diff(self.flux, axis=1, prepend=0)
-        self.input_flux = np.diff(self.input_flux, axis=0, prepend=0)
-        self.magnification = self.flux / np.expand_dims(self.input_flux, axis=[0, 2])
+        self.input_flux = np.diff(self.input_flux, axis=1, prepend=0)
+        self.magnification = self.flux / self.input_flux
 
         self.moment = np.diff(self.moment, axis=1, prepend=0)
 
@@ -257,29 +256,33 @@ class TransferMatrix:
         self.timestamp = str(datetime.utcnow())
 
     def radial_lightcurve(
-        self, source=3, distances=None, occulter_radius=0, get_offsets=False
+        self, source=3, distances=None, occulter_radius=0, pixels=1e6, get_offsets=False
     ):
         """
         :param source:
-            Give the size of the source,
-            or a brightness profile (array or StarProfile object)
-            that specifies the surface brightness of each annulus.
-            Such an array must match in size the matrix's source_radii array,
-            and each value of surface brightness in the profile must correspond
-            to that radius in source_radii.
+            Give the size of the source, or a brightness profile
+            (array or StarProfile object) that specifies the surface brightness
+            of each annulus. Such an array must match in size the
+            matrix's source_radii array, and each value of surface
+            brightness in the profile must correspond to that radius in source_radii.
         :param distances:
             A list of distances (between lens and source centers)
             where the results should be calculated.
             If None (default) will return the values at the matrix's distances array.
-            Otherwise, the values are linearly interpolated into the distances
-            that were calculated by the matrix. None of the distances can exceed
-            the maximum of the matrix's distances array
+            Otherwise, the values are linearly interpolated from the distances
+            that were calculated by the matrix. If any of the distances surpass
+            the matrix's maximum distance, we replace the results with the
+            point-source approximation (the reasoning is that far away from the lens,
+            each point on the source will have a similar magnification, which is
+            given by the point-source approximation).
         :param occulter_radius:
             Provide the radius of the physical extent of the lensing object.
             For very tiny objects (e.g., black holes) this can be effectively zero (default).
-            Otherwise, it the results are interpolated from the results calculated
+            Otherwise, the results are interpolated from the results calculated
             using the matrix's occulter_radii array.
-            The value requested cannot exceed the maximum of that array.
+            The value requested cannot exceed the maximum of the matrix
+            (will throw a ValueError) -- if your occulter is very big you'll
+            want to use eclipsing binary / transiting planet codes.
         :param get_offsets:
             If True, returns a tuple with the magnification and the astrometric offset.
             If False (default) returns just the magnifications.
@@ -293,6 +296,8 @@ class TransferMatrix:
             d = self.distances
         else:
             d = distances
+
+        d = np.array(d)
 
         # figure out the stellar light profile
         N = self.flux.shape[1]  # number of source radii
@@ -335,14 +340,7 @@ class TransferMatrix:
                 f"a list, or an array (of size {N}). "
             )
 
-        # multiply each profile's brightness
-        # by the surface area of the annulus
-        # area = np.pi * self.source_radii ** 2
-        # area = np.diff(area, prepend=0)  # get the annulus area
-        # area = np.expand_dims(area, axis=[0, 2])
-        # star_profile *= area  # the flux from each annulus scaled to the area
-
-        star_profile /= np.sum(star_profile, axis=1, keepdims=True)  # normalize to unity
+        # star_profile /= np.sum(star_profile, axis=1, keepdims=True)  # normalize to unity
 
         if occulter_radius > np.max(self.occulter_radii):
             raise ValueError(
@@ -352,56 +350,15 @@ class TransferMatrix:
 
         occulter_idx = occulter_radius == self.occulter_radii
 
-        if np.any(occulter_idx):
-            flux = self.flux[occulter_idx, :, :]
-            flux = np.sum(flux * star_profile, axis=1)  # apply the source profile
-            if flux.shape[0] > 1:
-                flux[0, :] *= 1 - frac
-                flux[1, :] *= frac
-                flux = np.sum(flux, axis=0)
-            else:
-                flux = flux[0, :]
-
-            flux_in = self.input_flux
-            flux_in = np.expand_dims(flux_in, axis=[0, 2])
-            flux_in = np.sum(flux_in * star_profile, axis=1)  # also for the input flux
-
-            if flux_in.shape[0] > 1:
-                flux_in[0, :] *= 1 - frac
-                flux_in[1, :] *= frac
-                flux_in = np.sum(flux_in, axis=0)
-            else:
-                flux_in = flux_in[0, :]
-
-            mag = flux / flux_in
-            # mag = mag[0, :]
-
-            # mag = self.magnification[occulter_idx, :, :]
-            # mag = np.sum(mag * star_profile, axis=1)  # apply the source profile
-            # mag = mag[0, :]   idx = np.argmax(self.occulter_radii < occulter_radius)
-
-            # x1 = self.occulter_radii[idx]
-            # x2 = self.occulter_radii[idx + 1]
-            # y1 = self.magnification[idx]
-            # y2 = self.magnification[idx + 1]
-            #
-            # # interpolate between the occulter radii above and below
-            # mag = y1 + ((occulter_radius - x1) / (x2 - x1)) * (y2 - y1)
-            # mag = np.sum(mag * star_profile, axis=1)  # apply the source profile
-            # mag = mag[0, :]
-        else:
+        if np.any(occulter_idx):  # no need to interpolate on occulter size
+            idx = [np.argmax(occulter_idx)]  # single index
+        else: # need to interpolate btw two occulter sizes
             # index of occulter radius below requested value
             idx = np.argmax(self.occulter_radii < occulter_radius)
-
-            x1 = self.occulter_radii[idx]
-            x2 = self.occulter_radii[idx + 1]
-            y1 = self.magnification[idx]
-            y2 = self.magnification[idx + 1]
-
-            # interpolate between the occulter radii above and below
-            mag = y1 + ((occulter_radius - x1) / (x2 - x1)) * (y2 - y1)
-            mag = np.sum(mag * star_profile, axis=1)  # apply the source profile
-            mag = mag[0, :]
+            idx = [idx, idx + 1]  # two indices
+        flux = self.interp_on_profile(self.flux[idx, :, :], star_profile, frac)
+        in_flux = self.interp_on_profile(self.input_flux[idx, :, :], star_profile, frac)
+        mag = flux / in_flux
 
         if distances is not None:
             mag = np.interp(d, self.distances, mag, right=1)
@@ -410,38 +367,59 @@ class TransferMatrix:
         if not get_offsets:
             return mag
         else:
-
-            if np.any(occulter_idx):
-                moments = self.moment[occulter_idx, :, :]
-                # apply the source size / profile
-                moments = np.sum(moments * star_profile, axis=1)
-
-                flux = self.flux[occulter_idx, :, :]
-                # apply the source size / profile
-                flux = np.sum(flux * star_profile, axis=1)
-
-            else:
-                y1 = self.moment[idx]
-                y2 = self.moment[idx + 1]
-                moments = y1 + ((occulter_radius - x1) / (x2 - x1)) * (y2 - y1)
-
-                # apply the source profile
-                moments = np.sum(moments * star_profile, axis=1)
-
-                y1 = self.flux[idx]
-                y2 = self.flux[idx + 1]
-                flux = y1 + ((occulter_radius - x1) / (x2 - x1)) * (y2 - y1)
-
-                # apply the source profile
-                flux = np.sum(flux * star_profile, axis=1)
-
+            moments = self.interp_on_profile(self.moment[idx, :, :], star_profile, frac)
             offsets = moments / flux
 
             if distances is not None:
                 offsets = np.interp(d, self.distances, offsets, right=0)
             return mag, offsets
 
+    @staticmethod
+    def interp_on_profile(data, profile, frac):
+        """
+        Internal method used for interpolation btw two
+        star profiles for e.g., similar star radii.
+        It will multiply the data (flux, moment, etc)
+        with the star profile, that has a 0th dimension
+        with either length one or two.
+        If it is length one, that means no interpolation.
+        If it is length two, we weigh the different results
+        with "frac" and then add them together.
+        If the data's 0th dim is non-scalar,
+        it just loops over each one.
+        In any case, the shape of the returned value
+        will have dim 1 removed (summed over).
+        """
+        for i in range(data.shape[0]):
+            d = np.sum(data[i] * profile, axis=1)  # apply the source profile
+            if profile.shape[0] > 1:
+                d[0, :] *= 1 - frac
+                d[1, :] *= frac
+                d = np.sum(d, axis=0)
+            else:
+                d = d[0, :]
+            data[i] = d
+
+        return data
+
     def save(self, filename="matrix"):
+        """
+        Save the matrix data into an .npz file on disk.
+        Also save an accompanying .txt file with the same
+        name with a summary of the matrix statistics
+        (see the update_notes() function).
+
+
+        :param filename: string
+            The filename used to save the matrix.
+            The default is "matrix" but we encourage
+            to save the matrix with some parameters in the name.
+            E.g., "matrix_SR1.000-2.000_D0.000-5.000" would
+            be a good name for a matrix with source radius (SR)
+            between 1 and 2, and distances (D) between 0 and 5.
+            The filename extension .npz is optional
+            (will be added automatically if missing).
+        """
         if filename.endswith('.npz'):
             filename = filename[:-4]
         np.savez_compressed(filename, **vars(self))
@@ -449,6 +427,13 @@ class TransferMatrix:
             text_file.write(self.notes)
 
     def load(self, filename):
+        """
+        Load a the matrix data from an .npz file, into an existing matrix.
+
+        :param filename:
+            The filename to load the data from.
+            In this case the filename must include the .npz extension.
+        """
         A = np.load(filename, allow_pickle=True)
         for k in vars(self).keys():
             val = A[k]
@@ -458,26 +443,57 @@ class TransferMatrix:
 
     @classmethod
     def from_file(cls, filename):
+        """
+        Create a new matrix based on data in an .npz file.
+
+        :param filename:
+            Name of file to load from (see the load() function).
+        :return:
+            A newly created TransferMatrix object,
+            with the data loaded from file.
+        """
         T = TransferMatrix()
         T.load(filename)
         return T
 
     def __add__(self, other):
+        """
+        Generate a new TransferMatrix object based on the combination
+        of two existing matrices. The distances covered by the two matrices
+        should span different ranges, while the other parameters
+        such as source and occulter radii must be the same.
+        If one of the matrices doesn't have a complete dataset,
+        the new matrix is just a copy of the matrix that does
+        have existing data. If both are empty it raises a ValueError.
+
+        Ideally the two matrices should be covering adjacent ranges
+        in distances. If there is a single value overlap, that value
+        is dropped from the larger-distance matrix. E.g., if we add
+        a matrix with distances [0 0.1 0.2] and [0.2 0.3 0.4] then
+        the values associated with 0.2 in the second matrix are dropped.
+        The step sizes do not need to be the same between matrices.
+
+        :param other: TransferMatrix
+            A matrix to be added to this matrix.
+        :return:
+            A new TransferMatrix object with the combined values.
+        """
+
+        if not isinstance(other, TransferMatrix):
+            raise TypeError(f'Must give a TransferMatrix to __add__(). Was given a {type(other)} instead...')
 
         if not self.complete and not other.complete:
             raise ValueError("Both operands to addition of matrices are incomplete!")
         elif not self.complete:
-            return other
+            return copy.deepcopy(other)
         elif not other.complete:
-            return self
+            return copy.deepcopy(self)
 
         # assume both matrices are filled with data
         if not np.array_equal(self.source_radii, other.source_radii):
             raise ValueError('Values for "source_radii" are inconsistent!')
         if not np.array_equal(self.occulter_radii, other.occulter_radii):
             raise ValueError('Values for "occulter_radii" are inconsistent!')
-        if not np.array_equal(self.input_flux, other.input_flux):
-            raise ValueError('Values for "input_flux" are inconsistent!')
 
         new = TransferMatrix()
 
@@ -534,20 +550,19 @@ class TransferMatrix:
         This will also remove every other value in the
         1D arrays of "distances", "source_radii" and
         "occulter_radii", and double the step sizes.
-
-        :return:
         """
         N = [int(np.floor(s / 2) * 2) for s in self.flux.shape]
         self.flux = self.flux[:, 0:N[1]:2, :] + self.flux[:, 1::2, :]
         self.flux = self.flux[0:N[0]:2, :, 0:N[2]:2]
 
-        self.input_flux = self.input_flux[0:N[1]:2] + self.input_flux[1::2]
+        self.input_flux = self.input_flux[:, 0:N[1]:2, :] + self.input_flux[:, 1::2, :]
+        self.input_flux = self.input_flux[0:N[0]:2, :, 0:N[2]:2]
 
         self.moment = self.moment[:, 0:N[1]:2, :] + self.moment[:, 1::2, :]
         self.moment = self.moment[0:N[0]:2, :, 0:N[2]:2]
 
         # self.magnification = self.magnification[0:N[0]:2, 0:N[1]:2, 0:N[2]:2]
-        self.magnification = self.flux / np.expand_dims(self.input_flux, axis=[0, 2])
+        self.magnification = self.flux / self.input_flux
 
         self.occulter_radii = self.occulter_radii[0:N[0]:2]
         self.source_radii = (self.source_radii[0:N[1]:2] + self.source_radii[1::2]) / 2
@@ -561,21 +576,38 @@ class TransferMatrix:
 
 
 class StarProfile:
+    """
+    A class to produce stellar brightness profiles to be ingested by the TransferMatrix.
+    Each profile must have an array of values of the same length as the source_radii
+    array on the TransferMatrix object that we want to use.
+    Each value in the profile represents the relative surface brightness of an annulus
+    given at that radius on the star.
+
+    For a uniform profile it just has ones up to the radius of the star and then zeros.
+    Other distributions (e.g., using limb darkening) will be added later.
+    The flux from each value in the surface_brightness array is multiplied by the amount
+    of light from each annulus in the source surface and the image surface.
+    The sum of these flux values is used to calculate the magnification.
+    The same can be done for flux and 1st moments to get the offset.
+    """
+
     def __init__(self, radii, profile="uniform", source_radius=1, **kwargs):
         self.radii = radii
-        self.values = np.zeros(radii.size)
+        self.surface_brightness = np.zeros(radii.size)
         profile = profile.lower()
         if profile == "uniform":
-            self.values[source_radius >= self.radii] = 1
+            self.surface_brightness[source_radius >= self.radii] = 1
         else:
             raise KeyError(
                 f'Unknown star profile "{profile}". ' 'Use "unform", etc... '
             )
 
-        self.values /= np.sum(self.values)  # total light must be unity
-
     def get_matrix(self):
-        return np.expand_dims(self.values, axis=[0, 2])
+        """
+        Prepare the surface brightness values as a 3D matrix that can be broadcast
+        to the flux values in the TransferMatrix object.
+        """
+        return np.expand_dims(self.surface_brightness, axis=[0, 2])
 
 
 def draw_contours(distance, source_radius, points=1e5, plotting=False):
@@ -588,30 +620,30 @@ def draw_contours(distance, source_radius, points=1e5, plotting=False):
 
     Parameters
     ----------
-    :param distance:
-        the distance between source and lens centers in units
+    :param distance: scalar float
+        The distance between source and lens centers in units
         of the Einstein radius
 
-    :param source_radius:
-        size of the source (star) in units of the Einstein radius
+    :param source_radius: scalar float
+        Size of the source (star) in units of the Einstein radius
 
     :param points: scalar integer
-        how many points should be sampled on the circumference of the source disk
+        How many points should be sampled on the circumference of the source disk
 
     :param plotting: boolean
-        if True, will show a plot of the two contours
+        If True, will show a plot of the two contours
 
     :return z1x:
-        the x values of points along the smaller contour
+        The x values of points along the smaller contour
 
     :return z1y:
-        the y values of points along the smaller contour
+        The y values of points along the smaller contour
 
     :return z2x:
-        the x values of points along the larger contour
+        The x values of points along the larger contour
 
     :return z2y:
-        the y values of points along the larger contour
+        The y values of points along the larger contour
 
     Reference
     ---------
@@ -692,7 +724,71 @@ def make_surface(
     plotting=False,
 ):
 
-    internal = distance < source_radius
+    """
+    Take the contours of the two images of the source and plot them on a 2D binary map.
+    On this map, True means there is light, and False means no light.
+    The total number of True pixels represents the total amount of flux
+    (since lensing preserves surface brightness).
+
+    If the two images are seprate, we will get one map with two blobs of light.
+    If the two images are overlapping, we will get a map with one blob that has
+    a hole inside it (for light reflected away from the observer).
+
+    For each set of contours the function will find the correct resolution
+    (i.e., the number of pixels along a line of length of one Einstein radius),
+    such that the total image will have a total number of pixels equal to the
+    "pixels" input. This makes sure that even for small sources we maintain
+    sufficient resolution to avoid aliasing on the pixelated edges of the images.
+    For small sources and large distances, the gap between images requires a lot
+    of pixels so the resolution will go down, potentially affecting the precision.
+    It is best to avoid such combinations or to give bigger values of "pixels".
+
+    The contours are placed on the map and then the area of the images is
+    "colored in" line by line. If the contours are too sparsely sampled,
+    there will be gaps between lines and the function will raise an exception.
+
+    :param distance: scalar float
+        Distance between center of source and lens.
+    :param source_radius: scalar float
+        Size of the source in units of the Einstein radius.
+    :param z1x: float array
+        The x-values of the contour of the first image (the small one).
+    :param z1y: float array
+        The y-values of the contour of the first image (the small one).
+    :param z2x: float array
+        The x-values of the contour of the second image (the big one).
+    :param z2y: float array
+        The x-values of the contour of the second image (the big one).
+    :param pixels: scalar integer
+        The total number of pixels for each image used in the calculation
+        (there are three binary images and two float images with this
+        number of pixels allocated by this function).
+        The function will use this number to determine the resolution
+        (pixels per Einstein radius).
+        For smaller sources, where the image contours do not cover much area,
+        the resolution will be higher than for large sources.
+    :param plotting: scalar boolean
+        If True, will show the image of the two light blobs. Default is False.
+
+    :return im: binary 2D array
+        A 2D binary map of the image(s) of the source after lensing.
+        The total number of pixels in this map represents the amount of flux
+        from the image(s), that can be compared to the flux from an unlensed source.
+    :return x_grid: float 2D array
+        A grid of values of the same size as "im" with the x coordinate value saved
+        in each pixel. Useful for calculating moments, etc.
+    :return y_grid: float 2D array
+        A grid of values of the same size as "im" with the y coordinate value saved
+        in each pixel. Useful for calculating moments, etc.
+    :return resolution: scalar integer
+        The number of pixels inside a line of length of the Einstein radius.
+        This is important to have in order to compare flux values from
+        different calculations: just comparing the number of "light pixels"
+        in the image is not enough, as the resolution may cause each pixel
+        to represent a different amount of surface area in physical space.
+
+    """
+    internal = distance < source_radius  # is the lens inside the disk of the source
 
     # extent of the required image, in Einstein units
     left = min(np.min(z1x), np.min(z2x))
@@ -702,7 +798,7 @@ def make_surface(
     # print(f'left= {left}, right= {right}, top= {top}')
 
     total_area = top * (right - left)
-    resolution = np.floor(np.sqrt(pixels/total_area))
+    resolution = int(np.floor(np.sqrt(pixels/total_area)))
 
     # extent of the image in pixels
     height = int(np.ceil(top * resolution) + 1)
@@ -751,7 +847,7 @@ def make_surface(
             mn = np.min(indices)
             im2[i, mn:mx] = True
 
-    if np.sum(np.diff(im2[:, 0])) > 4:
+    if np.sum(np.diff(im2[:, 0])) > 2:
         raise RuntimeError(f'Number of transitions ({np.sum(np.diff(im2[:, 0])) }) is too high. '
                            f'Increase number of points on the circle. '
                            f'distance= {distance}, source radius= {source_radius}')
@@ -787,9 +883,45 @@ def make_surface(
 
 
 def remove_occulter(im, occulter_radius, r_squared_grid, plotting=False, return_changed_flag=False):
+    """
+    Find areas of the image of the source that are supposed to be occulted
+    by the physical size of the lens, and replace any True values in that image
+    with False. This represents the occultation by the lens.
+
+    If the new occulter size does not remove any new pixels from "im",
+    it just returns the same matrix. If any of the pixels are affected,
+    the change is done in-place and the modified image is returned.
+
+    The reason we need to discern between the two cases where the image
+    is changed or not, is that if the image is not changed, there is no
+    need to recalculate the sum of pixels in the image, which is expensive.
+    If we are iterating over occulter sizes, often for many steps the occulter
+    is too small to touch any of the images, so that could save us many computation.
+
+    :param im: binary 2D array
+        The boolean map used to denote where there is light from the two images of the source.
+    :param occulter_radius: scalar float
+        The physical size of the lensing object, in units of Einstein radius.
+    :param r_squared_grid: float 2D array
+        An image of the same size as "im" where each pixel value contains
+        the x and y coordinates, squared and added.
+        The values represent the square of the distance between the center of the lens
+        and each point on the binary image.
+    :param plotting: boolean scalar
+        If True, will show the image. Default is False.
+    :param return_changed_flag: boolean scalar
+        If True, will return the image "im" and also a "changed_flag" boolean scalar, as a tuple.
+        This is useful if you also want to know if the image has changed since the last calculation.
+        This saves having to re-sum the image even though it did not change,
+        e.g., when iterating over slowly increasing occulter radius.
+    :return:
+        Either just the "im" array (modified in place) or a tuple with (im, changed_flag).
+        If changed_flag is True, that means there was at least one pixel changed in "im".
+    """
 
     idx = r_squared_grid[0, :] < occulter_radius ** 2
     changed_flag = False
+
     if np.any(im[0, idx]):
         idx = r_squared_grid < occulter_radius ** 2
         im[idx] = 0
@@ -810,15 +942,50 @@ def single_geometry(
     distance,
     occulter_radius=0,
     circle_points=1e5,
+    pixels=1e6,
     get_offsets=False,
     plotting=False,
 ):
+    """
+    Directly calculate the magnification from a specific micro-lensing alignment.
+    The function uses the same internal calculations that are used to make a
+    TransferMatrix object, but instead of pre-calculating and figuring out
+    how the magnification looks byu interpolating and wighing with a star profile,
+    this function just directly generates contours and surface maps and finds
+    the magnification from that image.
+    Utilizes draw_contours(), make_surface() and remove_occulter() in sequence.
 
+    :param source_radius: scalar float
+        The size of the source that is being lensed (in units of the Einstein radius).
+    :param distance: scalar float
+        The distance between the center of the lens and the center of the source (Einstein units).
+    :param occulter_radius: scalar float
+        The physical size of the lensing object, that can hide some of the light of the image
+         (Einstein units). Default is zero (no occultation, e.g., a black hole lens).
+    :param circle_points: scalar integer
+        The number of points on the circumference of the source, used to make a 2D contour of the images.
+        For very large sources this should be increased from the default 1e5 to 1e6 or more.
+    :param pixels: scalar integer
+        The total number of pixels in the generated image. The higher this number,
+        the higher the resolution of the image. Default is 1e7.
+    :param get_offsets: boolean scalar
+        If True, will also calculate the offset of the image's center of light
+        from the true source position (in Einstein units). Default is False.
+    :param plotting: scalar boolean
+        If True, will plot the image and show the positions of the source and lens.
+        This uses the plot_geometry() function. Default is False.
+
+    :return:
+        Either return the magnification for this geometry as a scalar float,
+        or return a tuple with the magnification and centroid offset,
+        if requested by setting get_offsets=True.
+        The offset is given in units of the Einstein radius.
+    """
     # t0 = timer()
     (z1x, z1y, z2x, z2y) = draw_contours(distance, source_radius, points=circle_points)
     # print(f'time to draw contours: {timer() - t0:.3f}s')
 
-    (im, x_grid, y_grid, resolution) = make_surface(distance, source_radius, z1x, z1y, z2x, z2y)
+    (im, x_grid, y_grid, resolution) = make_surface(distance, source_radius, z1x, z1y, z2x, z2y, pixels=pixels)
 
     if occulter_radius > 0:
         im2 = remove_occulter(im, occulter_radius, x_grid ** 2 + y_grid ** 2)
@@ -843,11 +1010,46 @@ def radial_lightcurve(
     distances=None,
     occulter_radius=0,
     circle_points=1e5,
+    pixels=1e6,
     get_offsets=False,
     verbosity=0,
     plotting=False,
 ):
+    """
+    Produce a lightcurve (measuring the relative magnification) for each radial distance
+    of the lens from the source. Calls single_geometry() iteratively to do this.
 
+
+    :param source_radius: scalar float
+        The size of the source that is being lensed (in units of the Einstein radius).
+    :param distances: list or array of floats
+        The set of distances used to calculate the magnifications (in Einstein units).
+    :param occulter_radius: scalar float
+        The physical size of the lensing object, that can hide some of the light of the image
+         (Einstein units). Default is zero (no occultation, e.g., a black hole lens).
+    :param circle_points: scalar integer
+        The number of points on the circumference of the source, used to make a 2D contour of the images.
+        For very large sources this should be increased from the default 1e5 to 1e6 or more.
+    :param pixels: scalar integer
+        The total number of pixels in the generated image. The higher this number,
+        the higher the resolution of the image. Default is 1e7.
+    :param get_offsets: boolean scalar
+        If True, will also calculate the offset of each image's center of light
+        from the true source position (in Einstein units). Default is False.
+    :param verbosity: scalar integer
+        If non-zero, will output more information to terminal while doing the calculations.
+        Default is zero (quiet execution).
+    :param plotting: scalar boolean
+        If True, will plot each image for each geometry calculated.
+        This uses the plot_geometry() function. Default is False.
+
+    :return:
+        Either returns one array of the same length as "distances"
+        or a tuple with two such arrays. The first will have the
+        magnification values and the optional second array will
+        have the center of light offset from the real source position.
+        To get both array, input get_offsets=True.
+    """
     if distances is None:
         distances = np.linspace(0, 10, 100, endpoint=False)
 
@@ -857,12 +1059,13 @@ def radial_lightcurve(
     for i, d in enumerate(distances):
 
         (mag[i], offset[i]) = single_geometry(
-            source_radius,
-            d,
-            occulter_radius,
-            circle_points,
-            True,
-            plotting,
+            source_radius=source_radius,
+            distance=d,
+            occulter_radius=occulter_radius,
+            circle_points=circle_points,
+            pixels=pixels,
+            get_offsets=True,
+            plotting=plotting,
         )
 
         if verbosity > 0:
@@ -889,6 +1092,41 @@ def plot_geometry(
         num_points=1e5,
         pause_time=1e-3
 ):
+    """
+    Show the results of calculations of a single geometry of source and lens.
+    Will display the image(s) of the source on a 2D map, where the True values
+    represent the area where light arrives from the source.
+    Will also show the center of the source, the center of light of the lensed image,
+    and the circumferences of the true, unlensed source and that of the lens
+    (i.e., the Einstein ring).
+
+    :param im: boolean 2D array
+        The 2D binary image of the light areas of the lens image.
+    :param x_grid: float 2D array
+        The same size as "im", where each pixel value holds the x-coordinate of that pixel.
+    :param y_grid: float 2D array
+        The same size as "im", where each pixel value holds the x-coordinate of that pixel.
+    :param source_radius: scalar float
+        The source size in units of the Einstein radius.
+    :param distance: scalar float
+        The distance between source and lens centers, in Einstein units.
+    :param occulter_radius: scalar float
+        The physical size of the lens, that can occult some of the light, in Einstein units.
+        If zero (the default), no part of the image is occulted (as is the case for, e.g., black holes).
+    :param mag: scalar float
+        The calculated magnification of this geometry. Will be printed on the axis label.
+    :param offset: scalar float
+        The calculated center of light offset of this geometry. Will be printed on the axis label.
+    :param num_points: scalar integer
+        The number of points on the circumferences of the lens and source,
+        that are used to plot them as dotted lines on top of the image.
+        Default is 1e5.
+    :param pause_time: scalar float
+        The number of seconds of pause that is added after plotting,
+        in case we want to loop over many geometries and stop for a short
+        while to look at the plot for each one. Default is 1e-3 seconds.
+
+    """
     num_points = int(num_points)
     im_left = np.min(x_grid)
     im_right = np.max(x_grid)
@@ -897,7 +1135,7 @@ def plot_geometry(
     plt.ion()
     plt.cla()
     plt.imshow(
-        np.pad(np.concatenate((np.flip(im, axis=0), im), axis=0), 100),
+        np.concatenate((np.flip(im, axis=0), im), axis=0),
         vmin=0,
         vmax=1,
         extent=(
@@ -948,28 +1186,40 @@ def plot_geometry(
     plt.show()
     plt.pause(pause_time)
 
-def point_source_approximation(distances):
 
+def point_source_approximation(distances):
+    """
+    Calculate the magnification for a point source, given some distances.
+
+    :param distances: scalar or array
+        The distances between the lens and the source, in units of the Einstein radius.
+    :return:
+        The magnification using the point-source approximation.
+        The output is the same size as the "distances" input. 
+    """
     sq = np.sqrt(1 + 4 / distances ** 2)
     return 0.5 * (sq + 1 / sq)
 
 
 if __name__ == "__main__":
-    single_geometry(occulter_radius=0.4, source_radius=.01, plotting=True, distance=0.2, circle_points=1e5)
 
-    T = TransferMatrix()
+    T = TransferMatrix.from_file('saved/matrix_SR0.100-1.000_D0.000-10.000.npz')
+    d = np.linspace(0, 30, 300, endpoint=True)
+    mag = T.radial_lightcurve(source=0.01, distances=d)
+    plt.plot(d, mag, '*')
+    plt.plot(d, point_source_approximation(d), '-')
+    # single_geometry(occulter_radius=0.6, source_radius=1, plotting=True, distance=0.5, circle_points=1e5)
 
-    T.min_source = 0.01
-    T.max_source = 0.1
-    T.step_source = 0.005
-    T.max_dist = 0.01
-    T.step_dist = 0.005
-    T.max_occulter = 2.5
-    T.step_occulter = 0.005
-
+    # T = TransferMatrix()
+    # T.min_source = 0.1
+    # T.max_source = 2.0
+    # T.step_source = 0.1
+    # T.max_dist = 6
+    # T.step_dist = 0.1
+    # T.max_occulter = 3
+    # T.step_occulter = 0.1
     # T.make_matrix()
     # T.save()
-    # T.load("matrix.npz")
 
     # distance = 1.3
     # source_radius = 2.0

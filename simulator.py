@@ -122,7 +122,8 @@ class Simulator:
                 size = 0
 
         if flux is None:
-            flux = size ** 2 * temp ** 4  # in arbitrary units
+            const = 2.744452656619891e+17  # boltzmann const * solar radius ** 2 * ergs
+            flux = 4 * np.pi * const * size ** 2 * temp ** 4  # in erg/s
 
         # print(f'mass= {mass} | type= {type} | size= {size} | temp= {temp} | flux= {flux}')
 
@@ -200,8 +201,8 @@ class Simulator:
                 this_matrix = m
                 break
 
-        if this_matrix is None:
-            raise ValueError(f'Cannot find any transfer matrix that includes the source radius ({r})')
+        # if this_matrix is None:
+            # raise ValueError(f'Cannot find any transfer matrix that includes the source radius ({r})')
 
         return this_matrix
 
@@ -228,14 +229,21 @@ class Simulator:
             self.input_timestamps(timestamps, 'hours')
 
         # first check if the requested source size is lower/higher than any matrix
+        max_sizes = np.array([mat.max_source for mat in self.matrices])
+        if np.all(max_sizes < self.source_size):
+            raise ValueError(f'Requested source size ({self.source_size}) '
+                             f'is larger than largest values in all matrices ({np.max(max_sizes)})')
 
         matrix = self.choose_matrix()
 
-        mag = matrix.radial_lightcurve(source=self.source_size,
-                                       distances=self.position_radii,
-                                       occulter_radius=self.occulter_size,
-                                       get_offsets=False  # at some point I'd want to add the offsets too
-                                       )
+        if matrix is None:  # source too small!
+            mag = transfer_matrix.point_source_approximation(self.position_radii)
+        else:
+            mag = matrix.radial_lightcurve(source=self.source_size,
+                                           distances=self.position_radii,
+                                           occulter_radius=self.occulter_size,
+                                           get_offsets=False  # at some point I'd want to add the offsets too
+                                           )
 
         # dilution of magnification if both objects are luminous
         self.magnifications = (self.star_flux * mag + self.lens_flux) / (self.star_flux + self.lens_flux)

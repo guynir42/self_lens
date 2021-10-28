@@ -20,9 +20,9 @@ T = TransferMatrix()
 T.min_source = 0.01
 T.max_source = 0.1
 T.step_source = 0.005
-T.max_dist = 0.2
+T.max_dist = 2.5
 T.step_dist = 0.005
-T.max_occulter = 3.0
+T.max_occulter = 2.0
 T.step_occulter = 0.005
 T.num_pixels = 3e7
 T.num_points = 1e5
@@ -39,5 +39,5 @@ if not os.path.exists('saved/fragments'):
 filename = f'saved/fragments/matrix_SR{T.min_source:.3f}-{T.max_source:.3f}_D{T.min_dist:.3f}-{T.max_dist:.3f}'
 
 T.make_matrix()
-# T.save(filename)
+T.save(filename)
 

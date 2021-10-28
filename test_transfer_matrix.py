@@ -12,6 +12,35 @@ sys.path.append(path.dirname(path.abspath(__file__)))
 import transfer_matrix
 
 
+def test_convergence():
+    p1 = 1e5
+    p2 = 1e7
+    p3 = 5e7
+    d = np.linspace(1, 2, 5)
+    r = 0.005
+    mag1 = transfer_matrix.radial_lightcurve(source_radius=r, distances=d, occulter_radius=0, pixels=p1)
+    mag2 = transfer_matrix.radial_lightcurve(source_radius=r, distances=d, occulter_radius=0, pixels=p2)
+    mag3 = transfer_matrix.radial_lightcurve(source_radius=r, distances=d, occulter_radius=0, pixels=p3, circle_points=1e6)
+    mag_ps = transfer_matrix.point_source_approximation(d)
+
+    try:
+        assert np.all(abs(mag2 - mag3) < 0.02), f'mag of at least one point between med res and high res ' \
+                                                f'({np.max(abs(mag2 - mag3))}) exceeds threshold'
+        assert np.all(abs(mag2 - mag3) < 0.02), f'mag of at least one point between high res and point source' \
+                                                f'({np.max(abs(mag3 - mag_ps))}) exceeds threshold'
+
+        assert np.all(abs(mag1 - mag3) > 0.02), 'low res mag and high res mag should be quite different.'
+
+    except:
+        plt.plot(d, mag1, '-x', label=f'pixels= {p1}')
+        plt.plot(d, mag2, '-+', label=f'pixels= {p2}')
+        plt.plot(d, mag3, '-o', label=f'pixels= {p3}')
+        plt.plot(d, mag_ps, '-', label='point source')
+        plt.yscale('log')
+        plt.legend()
+        plt.show(block=True)
+        raise
+
 def test_matrix_vs_direct_calculation(matrix):
 
     source_radii = matrix.source_radii[[1, 5, 15]]
