@@ -301,7 +301,7 @@ class TransferMatrix:
 
         # figure out the stellar light profile
         N = self.flux.shape[1]  # number of source radii
-        frac = 1  # the relative weight between first and second profiles (if given!)
+        profile_frac = 1  # the relative weight between first and second profiles (if given!)
         if isinstance(source, StarProfile):
             star_profile = source.get_matrix()
         elif type(source) is np.ndarray:
@@ -332,7 +332,7 @@ class TransferMatrix:
 
                 idx = np.argmax(self.source_radii > source)
                 star_profile[1, idx, :] = 1
-                frac = (source - self.source_radii[idx-1]) / (self.source_radii[idx] - self.source_radii[idx-1])
+                profile_frac = (source - self.source_radii[idx-1]) / (self.source_radii[idx] - self.source_radii[idx-1])
 
         else:
             raise TypeError(
@@ -352,12 +352,15 @@ class TransferMatrix:
 
         if np.any(occulter_idx):  # no need to interpolate on occulter size
             idx = [np.argmax(occulter_idx)]  # single index
-        else: # need to interpolate btw two occulter sizes
+            occulter_frac = 1
+        else:  # need to interpolate btw two occulter sizes
             # index of occulter radius below requested value
             idx = np.argmax(self.occulter_radii < occulter_radius)
             idx = [idx, idx + 1]  # two indices
-        flux = self.interp_on_profile(self.flux[idx, :, :], star_profile, frac)
-        in_flux = self.interp_on_profile(self.input_flux[idx, :, :], star_profile, frac)
+            occulter_frac = (occulter_radius - self.occulter_radii[idx[0]]) / (self.occulter_radii[idx[1]] - self.occulter_radii[idx[0]])
+
+        flux = self.interp_on_profile(self.flux[idx, :, :], star_profile, profile_frac, occulter_frac)
+        in_flux = self.interp_on_profile(self.input_flux[idx, :, :], star_profile, profile_frac, occulter_frac)
         mag = flux / in_flux
 
         if distances is not None:
@@ -367,7 +370,7 @@ class TransferMatrix:
         if not get_offsets:
             return mag
         else:
-            moments = self.interp_on_profile(self.moment[idx, :, :], star_profile, frac)
+            moments = self.interp_on_profile(self.moment[idx, :, :], star_profile, profile_frac, occulter_frac)
             offsets = moments / flux
 
             if distances is not None:
@@ -375,7 +378,7 @@ class TransferMatrix:
             return mag, offsets
 
     @staticmethod
-    def interp_on_profile(data, profile, frac):
+    def interp_on_profile(data, profile, profile_frac, occulter_frac):
         """
         Internal method used for interpolation btw two
         star profiles for e.g., similar star radii.
@@ -390,17 +393,21 @@ class TransferMatrix:
         In any case, the shape of the returned value
         will have dim 1 removed (summed over).
         """
+        occulter_frac = [occulter_frac, 1 - occulter_frac]
+        out_data = np.zeros((data.shape[0], data.shape[2]))
         for i in range(data.shape[0]):
             d = np.sum(data[i] * profile, axis=1)  # apply the source profile
             if profile.shape[0] > 1:
-                d[0, :] *= 1 - frac
-                d[1, :] *= frac
+                d[0, :] *= 1 - profile_frac
+                d[1, :] *= profile_frac
                 d = np.sum(d, axis=0)
             else:
                 d = d[0, :]
-            data[i] = d
+            out_data[i] = d * occulter_frac[i]
 
-        return data
+        out_data = np.sum(out_data, axis=0)
+
+        return out_data
 
     def save(self, filename="matrix"):
         """
@@ -1195,7 +1202,7 @@ def point_source_approximation(distances):
         The distances between the lens and the source, in units of the Einstein radius.
     :return:
         The magnification using the point-source approximation.
-        The output is the same size as the "distances" input. 
+        The output is the same size as the "distances" input.
     """
     sq = np.sqrt(1 + 4 / distances ** 2)
     return 0.5 * (sq + 1 / sq)
