@@ -205,40 +205,74 @@ class TransferMatrix:
 
                 (z1x, z1y, z2x, z2y) = draw_contours(d, source_radius, points=self.num_points)
 
-                (im, x_grid, y_grid, resolution) = make_surface(
-                    d,
-                    source_radius,
-                    z1x,
-                    z1y,
-                    z2x,
-                    z2y,
-                    pixels=self.num_pixels,
-                )
+                if d < source_radius:  # small image inside big one, need single map with image+hole
+                    (im, x_grid, y_grid, resolution) = make_surface_with_hole(
+                        z1x,
+                        z1y,
+                        z2x,
+                        z2y,
+                        pixels=self.num_pixels,
+                    )
+                    im = [im]
+                    x_grid = [x_grid]
+                    y_grid = [y_grid]
+                    resolution = [resolution]
 
-                r_squared_grid = x_grid ** 2 + y_grid ** 2
+                else:  # small image is separate from large image, make two maps
+                    # make the first image
+                    (im, x_grid, y_grid, resolution) = make_surface_one_image(
+                        z1x,
+                        z1y,
+                        pixels=self.num_pixels,
+                    )
+                    im = [im]
+                    x_grid = [x_grid]
+                    y_grid = [y_grid]
+                    resolution = [resolution]
 
-                for k, occulter_radius in enumerate(self.occulter_radii):
-                    # t0 = timer()
-                    (im2, changed_flag) = remove_occulter(im, occulter_radius, r_squared_grid, return_changed_flag=True)
-                    # print(f'timer to remove occulter: {timer()-t0:.3f}s'); t0 = timer()
+                    # now make the other image in a separate map
+                    (im2, x_grid2, y_grid2, resolution2) = make_surface_one_image(
+                        z2x,
+                        z2y,
+                        pixels=self.num_pixels,
+                    )
+                    im.append(im2)
+                    x_grid.append(x_grid2)
+                    y_grid.append(y_grid2)
+                    resolution.append(resolution2)
 
-                    self.input_flux[k, j, i] = np.pi * source_radius ** 2
+                # now go over one or two images and remove the occulter
+                for m in range(len(im)):
 
-                    if k == 0 or changed_flag:  # must calculate sums
+                    r_squared_grid = x_grid[m] ** 2 + y_grid[m] ** 2
 
-                        self.flux[k, j, i] = np.sum(im2) * 2 / resolution ** 2
-                        self.moment[k, j, i] = np.sum(im2 * (x_grid - d)) * 2 / resolution ** 2
+                    for k, occulter_radius in enumerate(self.occulter_radii):
+                        # t0 = timer()
+                        (im[m], changed_flag) = remove_occulter(
+                            im[m],
+                            occulter_radius,
+                            r_squared_grid,
+                            return_changed_flag=True
+                        )
+                        # print(f'timer to remove occulter: {timer()-t0:.3f}s'); t0 = timer()
 
-                    else:
-                        self.flux[k, j, i] = self.flux[k - 1, j, i]
-                        self.moment[k, j, i] = self.moment[k - 1, j, i]
+                        self.input_flux[k, j, i] = np.pi * source_radius ** 2
 
-                    # print(f'timer to calculate sums: {timer() - t0:.3f}s')
+                        if k == 0 or changed_flag:  # must calculate sums
+
+                            self.flux[k, j, i] += np.sum(im[m]) * 2 / resolution[m] ** 2
+                            self.moment[k, j, i] += np.sum(im[m] * (x_grid[m] - d)) * 2 / resolution[m] ** 2
+
+                        else:
+                            self.flux[k, j, i] = self.flux[k - 1, j, i]
+                            self.moment[k, j, i] = self.moment[k - 1, j, i]
+
+                        # print(f'timer to calculate sums: {timer() - t0:.3f}s')
 
                     if plotting:
                         offset = self.moment[k, j, i] / self.flux[k, j, i]
                         mag = self.flux[k, j, i] / self.input_flux[k, j, i]
-                        plot_geometry(im2, x_grid, y_grid, source_radius, d, occulter_radius, mag, offset)
+                        plot_geometry(im[0], x_grid[0], y_grid[0], source_radius, d, occulter_radius, mag, offset)
 
             self.calc_time = timer() - t1
 
@@ -518,12 +552,12 @@ class TransferMatrix:
         else:
             end_idx = self.distances.size
 
-        new.input_flux = self.input_flux
         new.source_radii = self.source_radii
         new.occulter_radii = self.occulter_radii
 
         new.distances = np.append(self.distances[:end_idx], other.distances)
         new.flux = np.append(self.flux[:, :, :end_idx], other.flux, axis=2)
+        new.input_flux = np.append(self.input_flux[:, :, :end_idx], other.input_flux, axis=2)
         new.magnification = np.append(self.magnification[:, :, :end_idx], other.magnification, axis=2)
         new.moment = np.append(self.moment[:, :, :end_idx], other.moment, axis=2)
 
@@ -720,9 +754,110 @@ def draw_contours(distance, source_radius, points=1e5, plotting=False):
     return z1x, z1y, z2x, z2y
 
 
-def make_surface(
-    distance,
-    source_radius,
+def make_surface_one_image(
+    z1x,
+    z1y,
+    pixels=1e6,
+    plotting=False,
+):
+    """
+    Take the contours of a single image of the source and plot it on a 2D binary map.
+    On this map, True means there is light, and False means no light.
+    The total number of True pixels represents the total amount of flux
+    (since lensing preserves surface brightness).
+    We call this function separately for the big an small images.
+    If the images are overlapping (i.e., distance<source_radius then
+    the right thing to do is to call make_surface_with_hole()).
+
+    For each set of contours the function will find the correct resolution
+    (i.e., the number of pixels along a line of length of one Einstein radius),
+    such that the total image will have a total number of pixels equal to the
+    "pixels" input. This makes sure that even for small sources we maintain
+    sufficient resolution to avoid aliasing on the pixelated edges of the images.
+
+    The contours are placed on the map and then the area of the images is
+    "colored in" line by line. If the contours are too sparsely sampled,
+    there will be gaps between lines and the function will raise an exception.
+
+    :param z1x: float array
+        The x-values of the contour of the first image (the small one).
+    :param z1y: float array
+        The y-values of the contour of the first image (the small one).
+    :param pixels: scalar integer
+        The total number of pixels for each image used in the calculation
+        (there are three binary images and two float images with this
+        number of pixels allocated by this function).
+        The function will use this number to determine the resolution
+        (pixels per Einstein radius).
+        For smaller sources, where the image contours do not cover much area,
+        the resolution will be higher than for large sources.
+    :param plotting: scalar boolean
+        If True, will show the image of the two light blobs. Default is False.
+
+    :return im: binary 2D array
+        A 2D binary map of one of the images of the source after lensing.
+        The total number of pixels in this map represents the amount of flux
+        from the image, that can be compared to the flux from an unlensed source.
+    :return x_grid: float 2D array
+        A grid of values of the same size as "im" with the x coordinate value saved
+        in each pixel. Useful for calculating moments, etc.
+    :return y_grid: float 2D array
+        A grid of values of the same size as "im" with the y coordinate value saved
+        in each pixel. Useful for calculating moments, etc.
+    :return resolution: scalar integer
+        The number of pixels inside a line of length of the Einstein radius.
+        This is important to have in order to compare flux values from
+        different calculations: just comparing the number of "light pixels"
+        in the image is not enough, as the resolution may cause each pixel
+        to represent a different amount of surface area in physical space.
+
+    """
+    # extent of the required image, in Einstein units
+    left = np.min(z1x)
+    right = np.max(z1x)
+    top = np.max(z1y)
+
+    total_area = top * (right - left)
+    resolution = int(np.floor(np.sqrt(pixels/total_area)))
+    height = int(np.ceil(top * resolution) + 1)
+    width = int(np.ceil((right - left) * resolution) + 1)
+    x_axis = np.linspace(left, right, width, endpoint=True)
+    y_axis = np.linspace(0, top, height, endpoint=True)
+
+    im = np.zeros((height, width), dtype=bool)
+
+    z1x_ind = np.round((z1x - left) * resolution).astype(int)
+    z1y_ind = np.round(z1y * resolution).astype(int)
+    good_indices = (z1x_ind >= 0) & (z1x_ind < width) & (z1y_ind >= 0) & (z1y_ind < height)
+    z1x_ind = z1x_ind[good_indices]
+    z1y_ind = z1y_ind[good_indices]
+
+    im[z1y_ind, z1x_ind] = True
+
+    for i in range(im.shape[0]):
+        indices = np.nonzero(im[i])[0]  # where the contours are non-zero
+        if indices.size:
+            mx = np.max(indices)
+            mn = np.min(indices)
+            im[i, mn:mx] = True
+
+    if np.sum(np.diff(im[:, 0])) > 2:
+        raise RuntimeError(f'Number of transitions ({np.sum(np.diff(im[:, 0])) }) is too high. '
+                           f'Increase number of points on the circle. ')
+
+    if plotting:
+        plt.figure()
+        ex = (x_axis[0], x_axis[-1], y_axis[0], y_axis[-1])
+        plt.imshow(im, extent=ex)
+        plt.show()
+
+    x_grid = np.repeat(np.expand_dims(x_axis, 0), y_axis.size, axis=0)
+    y_grid = np.repeat(np.expand_dims(y_axis, 1), x_axis.size, axis=1)
+
+    return im, x_grid, y_grid, resolution
+
+
+def make_surface_with_hole(
     z1x,
     z1y,
     z2x,
@@ -736,28 +871,19 @@ def make_surface(
     On this map, True means there is light, and False means no light.
     The total number of True pixels represents the total amount of flux
     (since lensing preserves surface brightness).
-
-    If the two images are seprate, we will get one map with two blobs of light.
-    If the two images are overlapping, we will get a map with one blob that has
-    a hole inside it (for light reflected away from the observer).
+    The image we get is a large image with a hole inside it
+    (for light reflected away from the observer).
 
     For each set of contours the function will find the correct resolution
     (i.e., the number of pixels along a line of length of one Einstein radius),
     such that the total image will have a total number of pixels equal to the
     "pixels" input. This makes sure that even for small sources we maintain
     sufficient resolution to avoid aliasing on the pixelated edges of the images.
-    For small sources and large distances, the gap between images requires a lot
-    of pixels so the resolution will go down, potentially affecting the precision.
-    It is best to avoid such combinations or to give bigger values of "pixels".
 
     The contours are placed on the map and then the area of the images is
     "colored in" line by line. If the contours are too sparsely sampled,
     there will be gaps between lines and the function will raise an exception.
 
-    :param distance: scalar float
-        Distance between center of source and lens.
-    :param source_radius: scalar float
-        Size of the source in units of the Einstein radius.
     :param z1x: float array
         The x-values of the contour of the first image (the small one).
     :param z1y: float array
@@ -795,8 +921,6 @@ def make_surface(
         to represent a different amount of surface area in physical space.
 
     """
-    internal = distance < source_radius  # is the lens inside the disk of the source
-
     # extent of the required image, in Einstein units
     left = min(np.min(z1x), np.min(z2x))
     right = max(np.max(z1x), np.max(z2x))
@@ -856,24 +980,10 @@ def make_surface(
 
     if np.sum(np.diff(im2[:, 0])) > 2:
         raise RuntimeError(f'Number of transitions ({np.sum(np.diff(im2[:, 0])) }) is too high. '
-                           f'Increase number of points on the circle. '
-                           f'distance= {distance}, source radius= {source_radius}')
+                           f'Increase number of points on the circle. ')
 
-    # print(f'time to loop over height of images: {timer() - t0:.3f}s')
-
-    # t0 = timer()
-    #
-    # im1 = ndimage.binary_closing(im1, border_value=0, iterations=1)
-    # im2 = ndimage.binary_closing(im2, border_value=0, iterations=1)
-    #
-    # print(f'time to dilate/erode: {timer() - t0:.3f}s')
-
-    # t0 = timer()
-
-    if internal:
-        im = np.bitwise_xor(im1, im2)
-    else:
-        im = np.bitwise_or(im1, im2)
+    im = np.bitwise_xor(im1, im2)
+    # im = np.bitwise_or(im1, im2)
 
     # print(f'time to subtract/add images: {timer() - t0:.3f}s')
 
@@ -903,7 +1013,7 @@ def remove_occulter(im, occulter_radius, r_squared_grid, plotting=False, return_
     is changed or not, is that if the image is not changed, there is no
     need to recalculate the sum of pixels in the image, which is expensive.
     If we are iterating over occulter sizes, often for many steps the occulter
-    is too small to touch any of the images, so that could save us many computation.
+    is too small to touch any of the images, so that could save us many computations.
 
     :param im: binary 2D array
         The boolean map used to denote where there is light from the two images of the source.
@@ -992,19 +1102,42 @@ def single_geometry(
     (z1x, z1y, z2x, z2y) = draw_contours(distance, source_radius, points=circle_points)
     # print(f'time to draw contours: {timer() - t0:.3f}s')
 
-    (im, x_grid, y_grid, resolution) = make_surface(distance, source_radius, z1x, z1y, z2x, z2y, pixels=pixels)
+    if distance < source_radius:  # internal small image (hole)
+        (im, x_grid, y_grid, resolution) = make_surface_with_hole(z1x, z1y, z2x, z2y, pixels=pixels)
+        im = [im]
+        x_grid = [x_grid]
+        y_grid = [y_grid]
+        resolution = [resolution]
+    else:  # separate images
+        (im, x_grid, y_grid, resolution) = make_surface_one_image(z1x, z1y, pixels=pixels)
+        im = [im]
+        x_grid = [x_grid]
+        y_grid = [y_grid]
+        resolution = [resolution]
+        (im2, x_grid2, y_grid2, resolution2) = make_surface_one_image(z2x, z2y, pixels=pixels)
+        im.append(im2)
+        x_grid.append(x_grid2)
+        y_grid.append(y_grid2)
+        resolution.append(resolution2)
 
-    if occulter_radius > 0:
-        im2 = remove_occulter(im, occulter_radius, x_grid ** 2 + y_grid ** 2)
-    else:
-        im2 = im
+    mag = 0
+    offset = 0
 
-    mag = np.sum(im2) * 2
-    offset = np.sum(im2 * (x_grid - distance)) * 2 / mag
-    mag /= np.pi * source_radius ** 2 * resolution ** 2
+    for i in range(len(im)):  # go over one or two images
+        if occulter_radius > 0:
+            im[i] = remove_occulter(im[i], occulter_radius, x_grid[i] ** 2 + y_grid[i] ** 2)
+        mag += np.sum(im[i]) * 2 / (np.pi * source_radius ** 2 * resolution[i] ** 2)
+        offset += np.sum(im[i] * (x_grid[i] - distance)) * 2 / (np.pi * source_radius ** 2 * resolution[i] ** 2)
+
+    offset /= mag
 
     if plotting:
-        plot_geometry(im2, x_grid, y_grid, source_radius, distance, occulter_radius, mag, offset)
+        if len(im) > 1:
+            fig, (ax1, ax2) = plt.subplots(1, 2)
+            plot_geometry(im[0], x_grid[0], y_grid[0], source_radius, distance, occulter_radius, mag, offset, axes=ax1)
+            plot_geometry(im[1], x_grid[1], y_grid[1], source_radius, distance, occulter_radius, mag, offset, axes=ax2)
+        else:
+            plot_geometry(im[0], x_grid[0], y_grid[0], source_radius, distance, occulter_radius, mag, offset)
 
     if get_offsets:
         return mag, offset
@@ -1097,7 +1230,8 @@ def plot_geometry(
         mag,
         offset,
         num_points=1e5,
-        pause_time=1e-3
+        pause_time=1e-3,
+        axes = None,
 ):
     """
     Show the results of calculations of a single geometry of source and lens.
@@ -1134,14 +1268,19 @@ def plot_geometry(
         while to look at the plot for each one. Default is 1e-3 seconds.
 
     """
+
+    if axes is None:
+        axes = plt.gca()
+
     num_points = int(num_points)
     im_left = np.min(x_grid)
     im_right = np.max(x_grid)
     im_bottom = -np.max(y_grid)
     im_top = np.max(y_grid)
+    print(f'left= {im_left} | right= {im_right} | top= {im_top} | bottom= {im_bottom}')
     plt.ion()
-    plt.cla()
-    plt.imshow(
+    axes.cla()
+    axes.imshow(
         np.concatenate((np.flip(im, axis=0), im), axis=0),
         vmin=0,
         vmax=1,
@@ -1160,7 +1299,8 @@ def plot_geometry(
     x[out_of_bounds] = np.NAN
     y[out_of_bounds] = np.NAN
 
-    plt.plot(x, y, ":r", label="lens")
+    axes.plot(x, y, ":r", label="lens radius")
+    axes.plot(0, 0, "ro", label="lens center")
 
     x2 = source_radius * np.cos(np.linspace(0, 2 * np.pi, num_points)) + distance
     y2 = source_radius * np.sin(np.linspace(0, 2 * np.pi, num_points))
@@ -1169,9 +1309,11 @@ def plot_geometry(
     x2[out_of_bounds] = np.NAN
     y2[out_of_bounds] = np.NAN
 
-    plt.plot(x2, y2, ":g", label="source radius")
+    axes.plot(x2, y2, ":g", label="source radius")
+    axes.plot(distance, 0, "go", label="source center")
 
     if occulter_radius > 0:
+
         x3 = occulter_radius * np.cos(np.linspace(0, 2 * np.pi, num_points))
         y3 = occulter_radius * np.sin(np.linspace(0, 2 * np.pi, num_points))
 
@@ -1179,17 +1321,15 @@ def plot_geometry(
         x3[out_of_bounds] = np.NAN
         y3[out_of_bounds] = np.NAN
 
-        plt.plot(x3, y3, ":m", label="occulter")
+        axes.plot(x3, y3, ":m", label="occulter")
 
-    plt.plot(distance, 0, "go", label="source center")
-    plt.plot(distance + offset, 0, "r+", label="center of light")
+    axes.plot(distance + offset, 0, "r+", label="center of light")
 
-    plt.xlabel(
-        f"d= {distance:.2f} | source r= {source_radius} | occulter r= {occulter_radius} | "
-        f"mag= {mag:.2f} | offset= {offset:.2f}"
+    axes.set(
+        xlabel=f"d= {distance:.2f} | source r= {source_radius} | occulter r= {occulter_radius} | mag= {mag:.2f} | offset= {offset:.2f}"
     )
-    plt.gca().set_aspect("equal")
-    plt.legend(bbox_to_anchor=(0.0, 1.04), loc="lower left")
+    axes.set_aspect("equal")
+    axes.legend(bbox_to_anchor=(0.0, 1.04), loc="lower left")
     plt.show()
     plt.pause(pause_time)
 
@@ -1210,12 +1350,12 @@ def point_source_approximation(distances):
 
 if __name__ == "__main__":
 
-    T = TransferMatrix.from_file('saved/matrix_SR0.100-1.000_D0.000-10.000.npz')
-    d = np.linspace(0, 30, 300, endpoint=True)
-    mag = T.radial_lightcurve(source=0.01, distances=d)
-    plt.plot(d, mag, '*')
-    plt.plot(d, point_source_approximation(d), '-')
-    # single_geometry(occulter_radius=0.6, source_radius=1, plotting=True, distance=0.5, circle_points=1e5)
+    # T = TransferMatrix.from_file('saved/matrix_SR0.100-1.000_D0.000-10.000.npz')
+    # d = np.linspace(0, 30, 300, endpoint=True)
+    # mag = T.radial_lightcurve(source=0.01, distances=d)
+    # plt.plot(d, mag, '*')
+    # plt.plot(d, point_source_approximation(d), '-')
+    single_geometry(occulter_radius=1.4, source_radius=1.1, plotting=True, distance=1.2, circle_points=1e5)
 
     # T = TransferMatrix()
     # T.min_source = 0.1

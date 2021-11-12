@@ -255,7 +255,7 @@ if __name__ == "__main__":
     s = Simulator()
     s.load_matrices()
     s.calc_lightcurve(star_mass=0.4, lens_mass=1.5, lens_type='NS', inclination=89.8, semimajor_axis=0.005)
-    d = s.position_radii[::10]
+    d = s.position_radii[::2]
     mag1 = transfer_matrix.radial_lightcurve(
         source_radius=s.source_size,
         occulter_radius=s.occulter_size,
@@ -268,19 +268,20 @@ if __name__ == "__main__":
         distances=d,
         pixels=1e6,
     )
-    mag3 = transfer_matrix.radial_lightcurve(
-        source_radius=s.source_size,
-        occulter_radius=s.occulter_size,
-        distances=d,
-        pixels=1e8,
-    )
+    # mag3 = transfer_matrix.radial_lightcurve(
+    #     source_radius=s.source_size,
+    #     occulter_radius=s.occulter_size,
+    #     distances=d,
+    #     pixels=1e7,
+    #     circle_points=1e7,
+    # )
 
     mag_ps = transfer_matrix.point_source_approximation(d)
 
     plt.plot(s.position_radii, s.magnifications, '-*', label='matrix')
     plt.plot(d, mag1, '-+', label='pixels= 1e4')
     plt.plot(d, mag2, '-x', label='pixels= 1e6')
-    plt.plot(d, mag3, '-o', label='pixels= 1e8')
+    # plt.plot(d, mag3, '-o', label='pixels= 1e8')
     plt.plot(d, mag_ps, '-', label='point source')
     plt.xlabel(f'time [{s.time_units}]')
     plt.ylabel('magnification')

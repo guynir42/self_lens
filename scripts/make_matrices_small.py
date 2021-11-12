@@ -20,12 +20,12 @@ T = TransferMatrix()
 T.min_source = 0.01
 T.max_source = 0.1
 T.step_source = 0.005
-T.max_dist = 2.5
+T.max_dist = 3.0
 T.step_dist = 0.005
 T.max_occulter = 2.0
 T.step_occulter = 0.005
-T.num_pixels = 3e7
-T.num_points = 1e5
+T.num_pixels = 1e6
+T.num_points = 1e6
 
 if len(sys.argv) > 2:
     T.min_dist = float(sys.argv[1])
