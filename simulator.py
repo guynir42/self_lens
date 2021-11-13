@@ -19,12 +19,14 @@ import transfer_matrix
 # After that, it becomes unphysical to get a giant occulter (it becomes an eclipsing binary)
 # If source is too big, should use geometric approximation.
 
+
 class Simulator:
 
     def __init__(self):
         self.matrices = None  # list of matrices to use to produce the lightcurves
 
         self.latest_runtime = 0  # how much time it took to calculate a single lightcurve
+        self.use_dilution = False  # automatically dilute the magnification with the companion flux
 
         self._default_star_type = 'WD'
         self._default_lens_type = 'WD'
@@ -208,6 +210,7 @@ class Simulator:
 
     def calc_lightcurve(self, **kwargs):
 
+        t0 = timer()
         if 'timestamps' in kwargs:
             timestamps = kwargs.pop('timestamps')
         else:
@@ -226,7 +229,7 @@ class Simulator:
 
         if self.timestamps is None:
             timestamps = np.linspace(-0.01 * self.orbital_period, 0.01 * self.orbital_period, 201, endpoint=True)
-            self.input_timestamps(timestamps, 'hours')
+            self.input_timestamps(timestamps*3600, 'seconds')
 
         # first check if the requested source size is lower/higher than any matrix
         max_sizes = np.array([mat.max_source for mat in self.matrices])
@@ -246,28 +249,93 @@ class Simulator:
                                            )
 
         # dilution of magnification if both objects are luminous
-        self.magnifications = (self.star_flux * mag + self.lens_flux) / (self.star_flux + self.lens_flux)
+        self.magnifications = mag
+
+        if self.use_dilution:
+            total_flux = self.star_flux + self.lens_flux
+            self.magnifications = (self.star_flux * self.magnifications + self.lens_flux) / total_flux
+
+        self.latest_runtime = timer() - t0
 
         return self.magnifications
 
+    def output_system(self):
+        sys = System()
+
+        # copy all relevant properties of this object
+        for k in sys.__dict__.keys():
+            if hasattr(self, k):
+                setattr(sys, k, getattr(self, k))
+
+        return sys
+
+
+class System:
+    def __init__(self):
+        self.semimajor_axis = None  # in AU
+        self.period = None  # in units of hours
+        self.inclination = None  # orbital inclination (degrees)
+        self.star_mass = None  # in Solar mass units
+        self.star_type = None  # what kind of object: "star", "WD", "NS", "BH"
+        self.star_temp = None  # in Kelvin
+        self.star_size = None  # in Solar radius units
+        self.star_flux = None  # bolometric flux in units of erg/s
+        self.lens_mass = None  # in Solar mass units
+        self.lens_type = None  # what kind of object: "star", "WD", "NS", "BH"
+        self.lens_temp = None  # in Kelvin
+        self.lens_size = None  # in Solar radius units
+        self.lens_flux = None  # bolometric flux in units of erg/s
+
+        self.timestamps = None  # for the lightcurve (units are given below, defaults to seconds)
+        self.time_units = None  # for the above-mentioned timestamps
+        self.magnifications = None  # the measured lightcurve
+
+        # a few dictionaries to be filled by each survey,
+        # each one keyed to the survey's name, and containing
+        # the results: detection probability for different distances
+        # and also the volume associated with each distance.
+        self.distances = {}  # parsec
+        self.det_prob = {}  # probability (0 to 1)
+        self.volumes = {}  # parsec^3
+
+        # for each parameter in the first block,
+        # what are the intervals around the given values,
+        # that we can use to estimate how many such systems exist
+        # (to fill out the density parameter).
+        # E.g., to say there are 10 systems / parsec^3 with lens_mass=0.4
+        # you must decide the lens mass range, maybe 0.35 to 0.45,
+        # only then can you say how many "such systems" should exist
+        self.par_ranges = {}  # for mass/size/temp of lens/star, inclination, semimajor axis
+        self.density = None  # how many such system we expect exist per parsec^3
+
+    def plot(self):
+        plt.plot(self.timestamps, self.magnifications, '-o')
+        plt.xlabel(f'time [{self.time_units}]')
+        plt.ylabel('magnification')
+        # TODO: add a more info on the plotting tool
+
 
 if __name__ == "__main__":
+
     s = Simulator()
     s.load_matrices()
     s.calc_lightcurve(star_mass=0.4, lens_mass=1.5, lens_type='NS', inclination=89.8, semimajor_axis=0.005)
-    d = s.position_radii[::2]
-    mag1 = transfer_matrix.radial_lightcurve(
-        source_radius=s.source_size,
-        occulter_radius=s.occulter_size,
-        distances=d,
-        pixels=1e4,
-    )
-    mag2 = transfer_matrix.radial_lightcurve(
-        source_radius=s.source_size,
-        occulter_radius=s.occulter_size,
-        distances=d,
-        pixels=1e6,
-    )
+    syst = s.output_system()
+    syst.plot()
+
+    # d = s.position_radii[::2]
+    # mag1 = transfer_matrix.radial_lightcurve(
+    #     source_radius=s.source_size,
+    #     occulter_radius=s.occulter_size,
+    #     distances=d,
+    #     pixels=1e4,
+    # )
+    # mag2 = transfer_matrix.radial_lightcurve(
+    #     source_radius=s.source_size,
+    #     occulter_radius=s.occulter_size,
+    #     distances=d,
+    #     pixels=1e5,
+    # )
     # mag3 = transfer_matrix.radial_lightcurve(
     #     source_radius=s.source_size,
     #     occulter_radius=s.occulter_size,
@@ -275,15 +343,17 @@ if __name__ == "__main__":
     #     pixels=1e7,
     #     circle_points=1e7,
     # )
-
-    mag_ps = transfer_matrix.point_source_approximation(d)
-
-    plt.plot(s.position_radii, s.magnifications, '-*', label='matrix')
-    plt.plot(d, mag1, '-+', label='pixels= 1e4')
-    plt.plot(d, mag2, '-x', label='pixels= 1e6')
+    #
+    # mag_ps = transfer_matrix.point_source_approximation(d)
+    #
+    # plt.plot(s.position_radii, s.magnifications, '-*', label='matrix')
+    # plt.plot(d, mag1, '-+', label='pixels= 1e4')
+    # plt.plot(d, mag2, '-x', label='pixels= 1e6')
     # plt.plot(d, mag3, '-o', label='pixels= 1e8')
-    plt.plot(d, mag_ps, '-', label='point source')
-    plt.xlabel(f'time [{s.time_units}]')
-    plt.ylabel('magnification')
-    plt.legend()
-    plt.show()
+    # plt.plot(d, mag_ps, '-', label='point source')
+    # plt.xlabel(f'time [{s.time_units}]')
+    # plt.ylabel('magnification')
+    # plt.legend()
+    # plt.show()
+
+
