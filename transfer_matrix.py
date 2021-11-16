@@ -122,7 +122,7 @@ class TransferMatrix:
         # that are produced by one uniform annulus of
         # the source, with surface brightness = 1
         # the axes of each data matrix correspond to
-        # 0: lens radius, 1: source size, 2: distance
+        # 0: occulter radius, 1: source radius, 2: distance
         self.flux = np.array([])
         self.input_flux = np.array([])
         self.magnification = np.array([])
@@ -388,10 +388,12 @@ class TransferMatrix:
             idx = [np.argmax(occulter_idx)]  # single index
             occulter_frac = 1
         else:  # need to interpolate btw two occulter sizes
-            # index of occulter radius below requested value
-            idx = np.argmax(self.occulter_radii < occulter_radius)
-            idx = [idx, idx + 1]  # two indices
-            occulter_frac = (occulter_radius - self.occulter_radii[idx[0]]) / (self.occulter_radii[idx[1]] - self.occulter_radii[idx[0]])
+            # index of occulter radius above requested value
+            idx = np.argmax(self.occulter_radii > occulter_radius)
+            idx = [idx-1, idx]  # two indices, one below and one above the requested value
+
+            occulter_frac = (occulter_radius - self.occulter_radii[idx[0]]) / \
+                            (self.occulter_radii[idx[1]] - self.occulter_radii[idx[0]])
 
         flux = self.interp_on_profile(self.flux[idx, :, :], star_profile, profile_frac, occulter_frac)
         in_flux = self.interp_on_profile(self.input_flux[idx, :, :], star_profile, profile_frac, occulter_frac)

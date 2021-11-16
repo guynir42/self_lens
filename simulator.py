@@ -3,6 +3,7 @@ import glob
 import numpy as np
 import matplotlib.pyplot as plt
 from timeit import default_timer as timer
+import scipy.integrate as integ
 
 import transfer_matrix
 
@@ -79,6 +80,8 @@ class Simulator:
         for f in filenames:
             self.matrices.append(transfer_matrix.TransferMatrix.from_file(f))
 
+        self.matrices = sorted(self.matrices, key=lambda mat: mat.max_source)
+
     def translate_time_units(self, units):
         d = {'seconds': 1, 'minutes': 60, 'hours': 3600, 'days': 3600 * 24, 'years': 3600 * 24 * 365.25}
         return d[units.lower()]
@@ -105,7 +108,7 @@ class Simulator:
             if type == 'MS':
                 temp = 5000
             if type == 'WD':
-                temp = 20000
+                temp = 10000
             if type == 'NS':
                 temp = 20000
             if type == 'BH':
@@ -117,7 +120,7 @@ class Simulator:
             if type == 'WD':
                 # Equation 5 of https://ui.adsabs.harvard.edu/abs/2002A%26A...394..489B/abstract
                 mass_chand = mass / 1.454
-                size = 0.001125 * np.sqrt(mass_chand ** (-2/3) - mass_chand ** (2/3))
+                size = 0.01125 * np.sqrt(mass_chand ** (-2/3) - mass_chand ** (2/3))
             if type == 'NS':
                 size = 0
             if type == 'BH':
@@ -185,6 +188,9 @@ class Simulator:
         if units is not None:
             self.time_units = units
 
+        if self.timestamps is None:
+            return  # have to put in the default timestamps and call this function again
+
         phases = (self.timestamps * self.translate_time_units(self.time_units)) / (self.orbital_period * 3600)
 
         projected_radius = self.semimajor_axis * 215.032 / self.einstein_radius  # AU to solar radii to Einstein radius
@@ -229,7 +235,7 @@ class Simulator:
 
         if self.timestamps is None:
             timestamps = np.linspace(-0.01 * self.orbital_period, 0.01 * self.orbital_period, 201, endpoint=True)
-            self.input_timestamps(timestamps*3600, 'seconds')
+            self.input_timestamps(timestamps * 3600 / self.translate_time_units(self.time_units), self.time_units)
 
         # first check if the requested source size is lower/higher than any matrix
         max_sizes = np.array([mat.max_source for mat in self.matrices])
@@ -242,6 +248,7 @@ class Simulator:
         if matrix is None:  # source too small!
             mag = transfer_matrix.point_source_approximation(self.position_radii)
         else:
+            # print(f'occulter_size= {self.occulter_size} | matrix.max_occulter= {matrix.max_occulter}')
             mag = matrix.radial_lightcurve(source=self.source_size,
                                            distances=self.position_radii,
                                            occulter_radius=self.occulter_size,
@@ -255,9 +262,23 @@ class Simulator:
             total_flux = self.star_flux + self.lens_flux
             self.magnifications = (self.star_flux * self.magnifications + self.lens_flux) / total_flux
 
+        self.fwhm = self.calc_fwhm()
+
         self.latest_runtime = timer() - t0
 
         return self.magnifications
+
+    def calc_fwhm(self):
+
+        lc = self.magnifications - 1
+        ts = self.timestamps
+
+        peak_idx = len(lc) // 2
+        peak = np.max(lc)
+        half_idx = np.argmax(lc > 0.5 * peak)
+        # print(f'peak= {peak} | half_idx= {half_idx}')
+
+        return 2 * (ts[peak_idx] - ts[half_idx])
 
     def output_system(self):
         sys = System()
@@ -273,7 +294,7 @@ class Simulator:
 class System:
     def __init__(self):
         self.semimajor_axis = None  # in AU
-        self.period = None  # in units of hours
+        self.orbital_period = None  # in units of hours
         self.inclination = None  # orbital inclination (degrees)
         self.star_mass = None  # in Solar mass units
         self.star_type = None  # what kind of object: "star", "WD", "NS", "BH"
@@ -295,8 +316,15 @@ class System:
         # the results: detection probability for different distances
         # and also the volume associated with each distance.
         self.distances = {}  # parsec
-        self.det_prob = {}  # probability (0 to 1)
         self.volumes = {}  # parsec^3
+        self.apparent_mags = {}  # in the specific band
+        self.visit_prob = {}  # probability (0 to 1) of detection in one visit
+        self.total_prob = {}  # probability after multiple visit in the duration of the survey
+        self.total_volumes = {}  # volumes observed over the duration of the survey
+        self.footprints = {}  # the angular area (in square degrees) over the duration of the survey
+        self.flare_durations = {}  # duration above detection limit (sec)
+        self.dilutions = {}  # how much is the lens light diluting the flare in each survey
+        self.effective_volumes = {}  # how much space is covered, including the detection probability, for each survey
 
         # for each parameter in the first block,
         # what are the intervals around the given values,
@@ -307,6 +335,76 @@ class System:
         # only then can you say how many "such systems" should exist
         self.par_ranges = {}  # for mass/size/temp of lens/star, inclination, semimajor axis
         self.density = None  # how many such system we expect exist per parsec^3
+
+    def bolometric_correction(self, wavelength=None, bandwidth=None):
+        """
+        Get a correction term to translate the bolometric magnitude
+        to the one measured by the filter.
+
+        :param wavelength:
+            Central wavelength of filter (if None, will assume broadband)
+        :param bandwidth:
+            Spectral width of filter (if None, will assume broadband)
+        :return 2-tuple:
+            A two-element tuple containing:
+            - A bolometric correction that needs to be added to any magnitude
+              to account for the limited bandwidth of the filter
+            - A dilution factor showing how much is the source flux mixed
+              with the lens flux. If the lens is dark (NS or BH) the dilution is 1.
+              If the fluxes are equal (inside the band!) the dilution is 0.5.
+        """
+        if wavelength is None or bandwidth is None:
+            return 0
+
+        def bb(la, temp):
+            const = 0.014387773538277204  # hc/k_b = 6.62607004e-34 * 299 792 458 / 1.38064852e-23
+            la *= 1e-9  # convert wavelength from nm to m
+            return 1 / (la ** 5 * (np.exp(const/(la * temp)) - 1))
+
+        la1 = wavelength - bandwidth/2
+        la2 = wavelength + bandwidth/2
+
+        min_la = 100
+        max_la = 1e5
+
+        bolometric1 = integ.quad(bb, min_la, max_la, self.star_temp)[0]
+        in_band1 = integ.quad(bb, la1, la2, self.star_temp)[0]
+        fraction1 = in_band1 / bolometric1
+        # print(f'bolometric1= {bolometric1} | in_band1= {in_band1}')
+
+        if self.lens_flux > 0 and self.lens_temp > 0:
+            bolometric2 = integ.quad(bb, min_la, max_la, self.lens_temp)[0]
+            in_band2 = integ.quad(bb, la1, la2, self.lens_temp)[0]
+            fraction2 = in_band2 / bolometric2
+        else:
+            fraction2 = 0
+
+        flux_band = self.star_flux * fraction1 + self.lens_flux * fraction2
+        flux_bolo = self.star_flux + self.lens_flux
+
+        ratio = flux_band / flux_bolo
+        dilution = (self.star_flux * fraction1) / (self.star_flux * fraction1 + self.lens_flux * fraction2)
+
+        return -2.5 * np.log10(ratio), dilution
+
+    def bolometric_mag(self, distance_pc):
+        """
+        Get the apparent magnitude of the system, not including the magnification,
+        given the distance (in pc). The magnitude is bolometric (i.e., it needs
+        a correction factor if using anything but a broadband filter).
+
+        :param distance_pc:
+            Distance to system, in parsec
+        :return:
+            Magnitude measured on Earth for this system at that distance
+        """
+
+        flux = self.star_flux + self.lens_flux
+
+        # ref: https://www.iau.org/static/resolutions/IAU2015_English.pdf
+        abs_mag = -2.5 * np.log10(flux) + 71.197425 + 17.5  # the 17.5 is to convert W->erg/s
+
+        return abs_mag + 5 * np.log10(distance_pc / 10)
 
     def plot(self):
         plt.plot(self.timestamps, self.magnifications, '-o')
