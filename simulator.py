@@ -87,7 +87,7 @@ class Simulator:
         return d[units.lower()]
 
     def translate_type(self, type):
-        t = type.lower().replace('_', ' ')
+        t = type.lower().replace('_', ' ').strip()
 
         if t == 'ms' or t == 'main sequence' or t == 'star':
             t = 'MS'
@@ -240,20 +240,25 @@ class Simulator:
         # first check if the requested source size is lower/higher than any matrix
         max_sizes = np.array([mat.max_source for mat in self.matrices])
         if np.all(max_sizes < self.source_size):
-            raise ValueError(f'Requested source size ({self.source_size}) '
-                             f'is larger than largest values in all matrices ({np.max(max_sizes)})')
-
-        matrix = self.choose_matrix()
-
-        if matrix is None:  # source too small!
-            mag = transfer_matrix.point_source_approximation(self.position_radii)
+            mag = transfer_matrix.large_source_approximation(
+                distances=self.position_radii,
+                source_radius=self.source_size,
+                occulter_radius=self.occulter_size,
+            )
+            # raise ValueError(f'Requested source size ({self.source_size}) '
+            #                  f'is larger than largest values in all matrices ({np.max(max_sizes)})')
         else:
-            # print(f'occulter_size= {self.occulter_size} | matrix.max_occulter= {matrix.max_occulter}')
-            mag = matrix.radial_lightcurve(source=self.source_size,
-                                           distances=self.position_radii,
-                                           occulter_radius=self.occulter_size,
-                                           get_offsets=False  # at some point I'd want to add the offsets too
-                                           )
+            matrix = self.choose_matrix()
+
+            if matrix is None:  # source too small!
+                mag = transfer_matrix.point_source_approximation(self.position_radii)
+            else:
+                # print(f'occulter_size= {self.occulter_size} | matrix.max_occulter= {matrix.max_occulter}')
+                mag = matrix.radial_lightcurve(source=self.source_size,
+                                               distances=self.position_radii,
+                                               occulter_radius=self.occulter_size,
+                                               get_offsets=False  # at some point I'd want to add the offsets too
+                                               )
 
         # dilution of magnification if both objects are luminous
         self.magnifications = mag
@@ -417,7 +422,7 @@ if __name__ == "__main__":
 
     s = Simulator()
     s.load_matrices()
-    s.calc_lightcurve(star_mass=0.4, lens_mass=1.5, lens_type='NS', inclination=89.8, semimajor_axis=0.005)
+    s.calc_lightcurve(star_mass=0.5, star_size=0.5, lens_mass=30, lens_type='BH ', inclination=89.8, semimajor_axis=0.01)
     syst = s.output_system()
     syst.plot()
 

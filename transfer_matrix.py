@@ -3,6 +3,8 @@ import copy
 import matplotlib.pyplot as plt
 from datetime import datetime
 from timeit import default_timer as timer
+import scipy.special
+import skimage.morphology
 
 """
 This module generates the core (radial) lightcurves and offsets
@@ -290,7 +292,7 @@ class TransferMatrix:
         self.timestamp = str(datetime.utcnow())
 
     def radial_lightcurve(
-        self, source=3, distances=None, occulter_radius=0, pixels=1e6, get_offsets=False
+        self, source, distances=None, occulter_radius=0, pixels=1e6, get_offsets=False
     ):
         """
         :param source:
@@ -820,7 +822,7 @@ def make_surface_one_image(
     top = np.max(z1y)
 
     total_area = top * (right - left)
-    resolution = int(np.floor(np.sqrt(pixels/total_area)))
+    resolution = np.sqrt(pixels/total_area)
     height = int(np.ceil(top * resolution) + 1)
     width = int(np.ceil((right - left) * resolution) + 1)
     x_axis = np.linspace(left, right, width, endpoint=True)
@@ -847,6 +849,8 @@ def make_surface_one_image(
         raise RuntimeError(f'Number of transitions ({np.sum(np.diff(im[:, 0])) }) is too high. '
                            f'Increase number of points on the circle. ')
 
+    im = skimage.morphology.binary_erosion(im)
+
     if plotting:
         plt.figure()
         ex = (x_axis[0], x_axis[-1], y_axis[0], y_axis[-1])
@@ -867,7 +871,6 @@ def make_surface_with_hole(
     pixels=1e6,
     plotting=False,
 ):
-
     """
     Take the contours of the two images of the source and plot them on a 2D binary map.
     On this map, True means there is light, and False means no light.
@@ -931,7 +934,7 @@ def make_surface_with_hole(
     # print(f'left= {left}, right= {right}, top= {top}')
 
     total_area = top * (right - left)
-    resolution = int(np.floor(np.sqrt(pixels/total_area)))
+    resolution = np.sqrt(pixels/total_area)
 
     # extent of the image in pixels
     height = int(np.ceil(top * resolution) + 1)
@@ -986,6 +989,7 @@ def make_surface_with_hole(
 
     im = np.bitwise_xor(im1, im2)
     # im = np.bitwise_or(im1, im2)
+    im = skimage.morphology.binary_erosion(im)
 
     # print(f'time to subtract/add images: {timer() - t0:.3f}s')
 
@@ -1057,8 +1061,8 @@ def remove_occulter(im, occulter_radius, r_squared_grid, plotting=False, return_
 
 
 def single_geometry(
-    source_radius,
     distance,
+    source_radius,
     occulter_radius=0,
     circle_points=1e5,
     pixels=1e6,
@@ -1074,10 +1078,10 @@ def single_geometry(
     the magnification from that image.
     Utilizes draw_contours(), make_surface() and remove_occulter() in sequence.
 
-    :param source_radius: scalar float
-        The size of the source that is being lensed (in units of the Einstein radius).
     :param distance: scalar float
         The distance between the center of the lens and the center of the source (Einstein units).
+    :param source_radius: scalar float
+        The size of the source that is being lensed (in units of the Einstein radius).
     :param occulter_radius: scalar float
         The physical size of the lensing object, that can hide some of the light of the image
          (Einstein units). Default is zero (no occultation, e.g., a black hole lens).
@@ -1148,10 +1152,10 @@ def single_geometry(
 
 
 def radial_lightcurve(
+    distances,
     source_radius,
-    distances=None,
     occulter_radius=0,
-    circle_points=1e5,
+    circle_points=1e6,
     pixels=1e6,
     get_offsets=False,
     verbosity=0,
@@ -1161,11 +1165,10 @@ def radial_lightcurve(
     Produce a lightcurve (measuring the relative magnification) for each radial distance
     of the lens from the source. Calls single_geometry() iteratively to do this.
 
-
-    :param source_radius: scalar float
-        The size of the source that is being lensed (in units of the Einstein radius).
     :param distances: list or array of floats
         The set of distances used to calculate the magnifications (in Einstein units).
+    :param source_radius: scalar float
+        The size of the source that is being lensed (in units of the Einstein radius).
     :param occulter_radius: scalar float
         The physical size of the lensing object, that can hide some of the light of the image
          (Einstein units). Default is zero (no occultation, e.g., a black hole lens).
@@ -1192,8 +1195,6 @@ def radial_lightcurve(
         have the center of light offset from the real source position.
         To get both array, input get_offsets=True.
     """
-    if distances is None:
-        distances = np.linspace(0, 10, 100, endpoint=False)
 
     mag = np.ones(distances.shape)
     offset = np.ones(distances.shape)
@@ -1201,8 +1202,8 @@ def radial_lightcurve(
     for i, d in enumerate(distances):
 
         (mag[i], offset[i]) = single_geometry(
-            source_radius=source_radius,
             distance=d,
+            source_radius=source_radius,
             occulter_radius=occulter_radius,
             circle_points=circle_points,
             pixels=pixels,
@@ -1279,7 +1280,7 @@ def plot_geometry(
     im_right = np.max(x_grid)
     im_bottom = -np.max(y_grid)
     im_top = np.max(y_grid)
-    print(f'left= {im_left} | right= {im_right} | top= {im_top} | bottom= {im_bottom}')
+    # print(f'left= {im_left} | right= {im_right} | top= {im_top} | bottom= {im_bottom}')
     plt.ion()
     axes.cla()
     axes.imshow(
@@ -1350,14 +1351,76 @@ def point_source_approximation(distances):
     return 0.5 * (sq + 1 / sq)
 
 
+def large_source_approximation(distances, source_radius, occulter_radius=0, edge_correction=True):
+    """
+
+    :param distances:
+    :param source_radius:
+    :param occulter_radius:
+    :return:
+
+    ref: Equations 5-6 in https://iopscience.iop.org/article/10.1086/376833/pdf
+    use https://en.wikipedia.org/wiki/Elliptic_integral#Complete_elliptic_integral_of_the_first_kind to figure out what
+    are K(k) and E(k) functions.
+    """
+
+    if occulter_radius == 0 and not edge_correction:
+        # equation (5)
+        mag = (2 * source_radius ** (-2) - (occulter_radius / source_radius) ** 2)
+        mag = 1 + mag * (distances < source_radius)  # only magnify inside the source disk
+
+    elif occulter_radius == 0 and edge_correction:
+        # equation (6) corrects for edge effects
+        k = (1 + ((distances - source_radius) ** 2) / 4) ** (-1/2)
+        # note that the scipy integrals take m=k^2
+        ellip = scipy.special.ellipk(k ** 2) - scipy.special.ellipe(k ** 2)
+        mag = 1 + 1 / source_radius ** 2 - 2 * (distances - source_radius) / (np.pi * source_radius ** 2 * k) * ellip
+
+    elif occulter_radius > 0:
+        # equation (7)
+        k = (1 + ((distances - source_radius) ** 2) / 4) ** (-1 / 2)
+        zeta = source_radius - distances
+        conditional = np.abs(zeta) * occulter_radius < np.abs(1 - occulter_radius ** 2)
+        argument = conditional * np.abs(zeta) * occulter_radius / np.abs(1 - occulter_radius ** 2) + ~conditional
+        phi = np.arccos(argument)
+        G_90 = zeta / k * (scipy.special.ellipk(k ** 2) - scipy.special.ellipe(k ** 2))
+        G_phi = zeta / k * (scipy.special.ellipkinc(phi, k ** 2) - scipy.special.ellipeinc(phi, k ** 2))
+        inside_sqrt = np.sqrt(zeta ** 2 + 4 * np.cos(phi) ** 2)
+        first = np.sign(zeta) * (np.pi / 2 - phi) * (1 - occulter_radius ** 2)
+        middle = -np.pi / 2 * occulter_radius ** 2 + G_90 - np.sign(occulter_radius - 1) * G_phi
+        last = -zeta / 2 * np.tan(phi) * (np.abs(zeta) + np.sign(occulter_radius - 1) * inside_sqrt)
+        B = first + middle + last
+        mag = 1 + (1 + B / np.pi) / source_radius ** 2
+
+    return mag
+
+
 if __name__ == "__main__":
+    # mag = single_geometry(distance=9.5, source_radius=10, plotting=True, circle_points=1e5, pixels=1e5)
+    # print(f'mag= {mag}')
+
+    source_radius = 2
+    occulter_radius = 0.8
+    d = np.linspace(source_radius * 0.0, source_radius * 1.9, 15)
+    # m1 = large_source_approximation(d, source_radius, occulter_radius, False)
+    m2 = large_source_approximation(d, source_radius, occulter_radius, True)
+    # m3 = radial_lightcurve(d, source_radius, occulter_radius, circle_points=1e5, pixels=1e5)
+    m4 = radial_lightcurve(d, source_radius, occulter_radius, circle_points=1e6, pixels=1e6)
+    m5 = radial_lightcurve(d, source_radius, occulter_radius, circle_points=1e7, pixels=1e7)
+
+    # plt.plot(d, source_radius ** 2 * (m1 - 1), label='simple approx')
+    plt.plot(d, source_radius ** 2 * (m2 - 1), label='elliptical approx')
+    # plt.plot(d, source_radius ** 2 * (m3 - 1), '-v', label='low-res simulation')
+    plt.plot(d, source_radius ** 2 * (m4 - 1), '-o', label='med-res simulation')
+    plt.plot(d, source_radius ** 2 * (m5 - 1), '-*', label='high-res simulation')
+    plt.legend()
 
     # T = TransferMatrix.from_file('saved/matrix_SR0.100-1.000_D0.000-10.000.npz')
     # d = np.linspace(0, 30, 300, endpoint=True)
     # mag = T.radial_lightcurve(source=0.01, distances=d)
     # plt.plot(d, mag, '*')
     # plt.plot(d, point_source_approximation(d), '-')
-    single_geometry(occulter_radius=1.4, source_radius=1.1, plotting=True, distance=1.2, circle_points=1e5)
+    # single_geometry(occulter_radius=1.4, source_radius=1.1, plotting=True, distance=1.2, circle_points=1e5)
 
     # T = TransferMatrix()
     # T.min_source = 0.1

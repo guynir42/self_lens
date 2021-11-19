@@ -17,13 +17,6 @@ def matrix():
 
 
 @pytest.fixture
-def matrix_high_res():
-    T = transfer_matrix.TransferMatrix()
-    T.load('saved/matrix_high_res.npz')
-    return T
-
-
-@pytest.fixture
 def counting_matrix_factory():
     def factory(min_dist=0,
                 max_dist=0.5,
@@ -50,12 +43,10 @@ def counting_matrix_factory():
         t0 = timer()
         for i in range(T.data_size()):
             T.flux[np.unravel_index(i, T.flux.shape)] = float(i)
+            T.input_flux[np.unravel_index(i, T.flux.shape)] = float(i)
             T.moment[np.unravel_index(i, T.moment.shape)] = float(i)
 
-        for i in range(T.input_flux.size):
-            T.input_flux[i] = float(i)
-
-        T.magnification = T.flux / np.expand_dims(T.input_flux, axis=[0, 2])
+        T.magnification = T.flux / T.input_flux
 
         T.update_notes()
         T.complete = True

@@ -328,9 +328,9 @@ if __name__ == "__main__":
         star_mass=0.5,
         star_temp=4000,
         star_type='MS',
-        star_size=0.5,
-        inclination=89.95,
-        semimajor_axis=10,
+        star_size=1.0,
+        inclination=89.99,
+        semimajor_axis=1,
         time_units='hours',
     )
     syst = sim.output_system()
