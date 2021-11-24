@@ -1,11 +1,14 @@
+import os
 import re
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from timeit import default_timer as timer
 import scipy.integrate as integ
 
 import transfer_matrix
+from survey import default_filter
 
 # TODO: add automatic white dwarf radius from https://github.com/mahollands/MR_relation
 # TODO: add automatic white dwarf radius from https://ui.adsabs.harvard.edu/abs/2002A%26A...394..489B/abstract eq (5)
@@ -57,23 +60,39 @@ class Simulator:
 
         # measurement inputs
         self.timestamps = None  # times measured from closest approach
-        self.time_units = "seconds"
+        self._time_units = "seconds"
 
         # intermediate results
         self.position_radii = None  # distances from star center, at given timestamps
         self.position_angles = None  # angles of vector connecting source and lens centers, measured at given timestamps
+        self.fwhm = None
 
         # outputs
         self.magnifications = None
         self.offset_sizes = None
         self.offset_angles = None
 
+        self.load_matrices()
+
+    @property
+    def time_units(self):
+        return self._time_units
+
+    @time_units.setter
+    def time_units(self, new_units):
+        if self.timestamps is not None:
+            self.timestamps *= translate_time_units(self.time_units) / translate_time_units(new_units)
+        self._time_units = new_units
+
     def load_matrices(self, filenames=None):
 
         self.matrices = []
 
         if filenames is None:
-            filenames = 'saved/*.npz'
+            if os.path.isdir('saved'):
+                filenames = 'saved/*.npz'
+            else:
+                filenames = 'matrix.npz'
 
         filenames = glob.glob(filenames)
 
@@ -81,10 +100,6 @@ class Simulator:
             self.matrices.append(transfer_matrix.TransferMatrix.from_file(f))
 
         self.matrices = sorted(self.matrices, key=lambda mat: mat.max_source)
-
-    def translate_time_units(self, units):
-        d = {'seconds': 1, 'minutes': 60, 'hours': 3600, 'days': 3600 * 24, 'years': 3600 * 24 * 365.25}
-        return d[units.lower()]
 
     def translate_type(self, type):
         t = type.lower().replace('_', ' ').strip()
@@ -191,7 +206,7 @@ class Simulator:
         if self.timestamps is None:
             return  # have to put in the default timestamps and call this function again
 
-        phases = (self.timestamps * self.translate_time_units(self.time_units)) / (self.orbital_period * 3600)
+        phases = (self.timestamps * translate_time_units(self.time_units)) / (self.orbital_period * 3600)
 
         projected_radius = self.semimajor_axis * 215.032 / self.einstein_radius  # AU to solar radii to Einstein radius
         x = projected_radius * np.sin(2 * np.pi * phases)
@@ -200,12 +215,14 @@ class Simulator:
         self.position_radii = np.sqrt(x ** 2 + y ** 2)
         self.position_angles = np.arctan2(y, x)
 
-    def choose_matrix(self):
-        r = self.source_size
+    def choose_matrix(self, source_size=None):
+
+        if source_size is None:
+            source_size = self.source_size
         matrix_list = sorted(self.matrices, key=lambda x: x.max_source, reverse=False)
         this_matrix = None
         for m in matrix_list:
-            if m.min_source < r < m.max_source:
+            if m.min_source < source_size < m.max_source:
                 this_matrix = m
                 break
 
@@ -213,6 +230,27 @@ class Simulator:
             # raise ValueError(f'Cannot find any transfer matrix that includes the source radius ({r})')
 
         return this_matrix
+
+    def crossing_time(self):
+        """
+        A rough estimate of the crossing time, considering
+        the impact parameter and the resulting source+lens chords,
+        and the orbital velocity.
+        """
+
+        width = 0
+        if self.impact_parameter < 1:
+            width += 2 * np.sqrt(1 - self.impact_parameter ** 2)
+
+        if self.impact_parameter < self.source_size:
+            width += 2 * np.sqrt(self.source_size ** 2 - self.impact_parameter ** 2)
+
+        width = max(1, width)
+        width *= self.einstein_radius / 215.032 # convert from Einstein radius to Solar radius to AU
+
+        velocity = 2 * np.pi * self.semimajor_axis / (self.orbital_period * 3600)
+
+        return width / velocity
 
     def calc_lightcurve(self, **kwargs):
 
@@ -234,8 +272,10 @@ class Simulator:
             self.input_timestamps(timestamps, time_units)
 
         if self.timestamps is None:
-            timestamps = np.linspace(-0.01 * self.orbital_period, 0.01 * self.orbital_period, 201, endpoint=True)
-            self.input_timestamps(timestamps * 3600 / self.translate_time_units(self.time_units), self.time_units)
+            # time_range = 0.01 * self.orbital_period * 3600
+            time_range = 8 * self.crossing_time()
+            timestamps = np.linspace(-time_range, time_range, 201, endpoint=True)
+            self.input_timestamps(timestamps / translate_time_units(self.time_units), self.time_units)
 
         # first check if the requested source size is lower/higher than any matrix
         max_sizes = np.array([mat.max_source for mat in self.matrices])
@@ -286,6 +326,8 @@ class Simulator:
         return 2 * (ts[peak_idx] - ts[half_idx])
 
     def output_system(self):
+        self.calc_lightcurve()
+
         sys = System()
 
         # copy all relevant properties of this object
@@ -311,9 +353,10 @@ class System:
         self.lens_temp = None  # in Kelvin
         self.lens_size = None  # in Solar radius units
         self.lens_flux = None  # bolometric flux in units of erg/s
+        self.einstein_radius = None  # in Solar radius units
 
         self.timestamps = None  # for the lightcurve (units are given below, defaults to seconds)
-        self.time_units = None  # for the above-mentioned timestamps
+        self._time_units = 'seconds'  # for the above-mentioned timestamps
         self.magnifications = None  # the measured lightcurve
 
         # a few dictionaries to be filled by each survey,
@@ -340,6 +383,15 @@ class System:
         # only then can you say how many "such systems" should exist
         self.par_ranges = {}  # for mass/size/temp of lens/star, inclination, semimajor axis
         self.density = None  # how many such system we expect exist per parsec^3
+
+    @property
+    def time_units(self):
+        return self._time_units
+
+    @time_units.setter
+    def time_units(self, new_units):
+        self.timestamps *= translate_time_units(self.time_units) / translate_time_units(new_units)
+        self._time_units = new_units
 
     def bolometric_correction(self, wavelength=None, bandwidth=None):
         """
@@ -411,11 +463,127 @@ class System:
 
         return abs_mag + 5 * np.log10(distance_pc / 10)
 
-    def plot(self):
-        plt.plot(self.timestamps, self.magnifications, '-o')
-        plt.xlabel(f'time [{self.time_units}]')
-        plt.ylabel('magnification')
-        # TODO: add a more info on the plotting tool
+    def plot(self, detection_limit=0.01, distance_pc=10):
+
+        fig, (ax1, ax2) = plt.subplots(1, 2)
+        ax1.plot(self.timestamps, self.magnifications, '-ob',
+                 label=f'magnification (max= {np.max(self.magnifications):.4f})')
+        ax1.set(
+            xlabel=f'time [{self.time_units}]',
+            ylabel = 'magnification',
+        )
+
+        # show the detection limit
+        ax1.plot(self.timestamps, np.ones(self.magnifications.shape)*(1 + detection_limit),
+                 '--g', label=f'detection limit ({int(detection_limit * 100) : d}%)')
+
+        # show the region above the limit
+        idx = self.magnifications - 1 > detection_limit
+        if np.any(idx):
+            width = max(self.timestamps[idx]) - min(self.timestamps[idx])
+            ax1.plot(self.timestamps[idx], self.magnifications[idx], '-or',
+                     label=f'event time ({width:.1f} {self.time_units})')
+
+        legend_handles, legend_labels = ax1.get_legend_handles_labels()
+
+        # add the period to compare to the flare time
+        legend_handles.append(Line2D([0], [0], lw=0))
+        period = self.orbital_period * 3600 / translate_time_units(self.time_units)
+        legend_labels.append(f'Period= {period:.1f} {self.time_units}')
+
+        # add the magnitudes at distance_pc
+        R = default_filter('R')
+        V = default_filter('V')
+        B = default_filter('B')
+
+        base_mag = self.bolometric_mag(distance_pc)
+        mag_R = base_mag + self.bolometric_correction(*R)[0]
+        mag_V = base_mag + self.bolometric_correction(*V)[0]
+        mag_B = base_mag + self.bolometric_correction(*B)[0]
+        legend_handles.append(Line2D([0], [0], lw=0))
+
+        legend_labels.append(f'Mag (at {int(distance_pc):d}pc):\n R~{mag_R:4.2f}\n V~{mag_V:4.2f}\n B~{mag_B:4.2f} ')
+
+        ax1.legend(legend_handles, legend_labels, bbox_to_anchor=(1.00, 0.95), loc="upper right")
+
+        # add a cartoon of the system in a subplot
+        ax1.set(position=[0.0, 0.0, 1.6, 1.0])
+        ax2.set(position=[0.15, -0.05, 0.45, 0.75])
+        ax2.axes.xaxis.set_visible(False)
+        ax2.axes.yaxis.set_visible(False)
+
+        # set the scale of the cartoon (for the object sizes at least)
+        scale = max(self.star_size, self.einstein_radius)
+
+        # add the star / source
+        solar_radii = '$R_\u2609$'
+        star_label = f'source size= {self.star_size:4.3f}{solar_radii}'
+        star = plt.Circle((-2, 0), self.star_size / scale, color=get_star_plot_color(self.star_temp), label=star_label)
+        ax2.set_xlim((-3.2, 3.2))
+        ax2.set_ylim((-1.5, 1.5))
+        ax2.set_aspect("equal")
+        ax2.add_patch(star)
+
+        # add the lensing object
+        lens_label = f'occulter size= {self.lens_size:4.3f}{solar_radii}'
+
+        if self.lens_type == 'WD':
+            lens = plt.Circle((2, 0), self.lens_size / scale, color=get_star_plot_color(self.lens_temp), label=lens_label)
+        elif self.lens_type == 'NS':
+            lens = plt.Circle((2, 0), 0.1, color=get_star_plot_color(self.lens_temp), label=lens_label)
+        elif self.lens_type == 'BH':
+            lens = plt.Circle((2, 0), 0.05, color='black', label=lens_label)
+        else:
+            raise KeyError(f'Unknown lens type ("{self.lens_type}"). Try using "WD" or "BH"... ')
+
+        ax2.add_patch(lens)
+
+        # add the Einstein ring
+        ring = plt.Circle((2, 0), self.einstein_radius / scale, color='r', linestyle=':', fill=False,
+                          label=f'Einstein radius= {self.einstein_radius:4.3f}{solar_radii}')
+        ax2.add_patch(ring)
+
+        phi = np.linspace(0, 2*np.pi, 1000)
+        x = 2*np.cos(phi)
+        y = 2*np.sin(phi) * np.sin(np.pi / 180 * (90 - self.inclination) * 50)
+        ax2.plot(x, y, '--k', label=f'a= {self.semimajor_axis}AU, i={self.inclination}$^\circ$')
+
+        legend_handles, legend_labels = ax2.get_legend_handles_labels()
+        # replace the legend marker for the WD star
+        legend_handles[1] = Line2D([0], [0], lw=0, marker='o', color=get_star_plot_color(self.lens_temp))
+        legend_handles[2] = Line2D([0], [0], marker='o', lw=0, color=get_star_plot_color(self.star_temp))
+        legend_handles[3] = Line2D([0], [0], linestyle=':', color='r')
+
+        # order = [2, 0, 3, 1]
+        # legend_handles = [legend_handles[i] for i in order]
+        # legend_labels = [legend_labels[i] for i in order]
+
+        ax2.legend(legend_handles, legend_labels,
+                   bbox_to_anchor=(-0.3, 1.04), loc="lower left")
+
+
+def translate_time_units(units):
+    d = {'seconds': 1, 'minutes': 60, 'hours': 3600, 'days': 3600 * 24, 'years': 3600 * 24 * 365.25}
+    if units not in d:
+        raise KeyError(f'Unknown units specified ("{units}"). Try "seconds" or "hours". ')
+    return d[units.lower()]
+
+
+def get_star_plot_color(temp):
+
+    lim1 = 2000
+    lim2 = 10000
+    push_low = 0.05
+
+    cmp = plt.get_cmap('turbo')
+
+    if temp < lim1:
+        return cmp(1)
+
+    if temp > lim2:
+        return cmp(push_low)
+
+    return cmp((lim2 - temp) / (lim2 - lim1) + push_low)
 
 
 if __name__ == "__main__":

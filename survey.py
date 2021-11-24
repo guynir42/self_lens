@@ -298,20 +298,26 @@ def default_filter(filter_name):
 
     :return:
         A tuple of (wavelength, bandwidth), both in nm
+
+    reference: https://en.wikipedia.org/wiki/Photometric_system
+
     """
     filters = {
-        'V': (550, 100),
-        'r': (658, 138),
-        'i': (800, 100),
+        'U': (365, 66),
+        'B': (445, 94),
+        'G': (464, 128),
+        'V': (551, 88),
+        'R': (658, 138),
+        'I': (806, 149),
         'F500W': (500, 200),
     }
     # TODO: make sure these numbers are correct!
 
-    if filter_name not in filters:
+    if filter_name.upper() not in filters:
         # raise KeyError(f'Unknonwn filter name "{filter_name}". Use "V" or "r" etc. ')
         return None, None
 
-    return filters[filter_name]
+    return filters[filter_name.upper()]
 
 
 if __name__ == "__main__":

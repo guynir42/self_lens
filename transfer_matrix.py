@@ -1128,7 +1128,6 @@ def single_geometry(
 
     mag = 0
     offset = 0
-
     for i in range(len(im)):  # go over one or two images
         if occulter_radius > 0:
             im[i] = remove_occulter(im[i], occulter_radius, x_grid[i] ** 2 + y_grid[i] ** 2)
@@ -1140,8 +1139,8 @@ def single_geometry(
     if plotting:
         if len(im) > 1:
             fig, (ax1, ax2) = plt.subplots(1, 2)
-            plot_geometry(im[0], x_grid[0], y_grid[0], source_radius, distance, occulter_radius, mag, offset, axes=ax1)
-            plot_geometry(im[1], x_grid[1], y_grid[1], source_radius, distance, occulter_radius, mag, offset, axes=ax2)
+            plot_geometry(im[0], x_grid[0], y_grid[0], source_radius, distance, occulter_radius, mag, offset, axes=ax1, legend=False)
+            plot_geometry(im[1], x_grid[1], y_grid[1], source_radius, distance, occulter_radius, mag, offset, axes=ax2, legend=True)
         else:
             plot_geometry(im[0], x_grid[0], y_grid[0], source_radius, distance, occulter_radius, mag, offset)
 
@@ -1233,8 +1232,9 @@ def plot_geometry(
         mag,
         offset,
         num_points=1e5,
-        pause_time=1e-3,
-        axes = None,
+        pause_time=0,
+        axes=None,
+        legend=True,
 ):
     """
     Show the results of calculations of a single geometry of source and lens.
@@ -1268,7 +1268,15 @@ def plot_geometry(
     :param pause_time: scalar float
         The number of seconds of pause that is added after plotting,
         in case we want to loop over many geometries and stop for a short
-        while to look at the plot for each one. Default is 1e-3 seconds.
+        while to look at the plot for each one. Default is 0,
+        which also means the function skips the call to plt.show() and
+        to plt.pause() at the end.
+    :param axes: scalar axes object
+        Give an axes object to plot into. Default is None, which is
+        translated into plt.gca().
+    :param legend: scalar boolean
+        Choose whether or not to show the plot legend, and the info
+        on the bottom of the axes. Default is True.
 
     """
 
@@ -1328,13 +1336,18 @@ def plot_geometry(
 
     axes.plot(distance + offset, 0, "r+", label="center of light")
 
-    axes.set(
-        xlabel=f"d= {distance:.2f} | source r= {source_radius} | occulter r= {occulter_radius} | mag= {mag:.2f} | offset= {offset:.2f}"
-    )
     axes.set_aspect("equal")
-    axes.legend(bbox_to_anchor=(0.0, 1.04), loc="lower left")
-    plt.show()
-    plt.pause(pause_time)
+
+    if legend:
+        axes.set(
+            xlabel=f"d= {distance:.2f} | source r= {source_radius} "
+                   f"| occulter r= {occulter_radius} | mag= {mag:.2f} | offset= {offset:.2f}"
+        )
+        axes.legend(bbox_to_anchor=(1.04, 0.0), loc="lower left")
+
+    if pause_time:
+        plt.show()
+        plt.pause(pause_time)
 
 
 def point_source_approximation(distances):
