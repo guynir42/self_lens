@@ -58,12 +58,45 @@ def test_matrix_vs_direct_calculation(matrix):
     for i, sr in enumerate(source_radii):
         mu2[i, :] = matrix.radial_lightcurve(source=sr, distances=d, occulter_radius=0, get_offsets=False)
 
-    if not np.all(abs(mu1-mu2) / mu2 < 0.01):  # maintain precision to within 1%
+    if not np.all(abs(mu1-mu2) < 0.01):  # maintain precision to within 1%
         plt.legend()
         plt.cla()
         for i, sr in enumerate(source_radii):
             plt.plot(d, mu2[i, :], '-o', label=f'source radius= {sr} (matrix)')
-            plt.plot(d, mu1[i, :], '-x', label=f'source radius= {sr} (direct)')
+
+        plt.gca().set_prop_cycle(None)
+        for i, sr in enumerate(source_radii):
+            plt.plot(d, mu1[i, :], '--x', label=f'source radius= {sr} (direct)')
+
+        plt.xlabel('Distance [Einstein radii]')
+        plt.ylabel('Magnification')
+        plt.legend()
+        plt.show(block=True)
+
+        raise ValueError(f'At least one point shows a different magnification of {np.max(abs(mu1-mu2))}')
+
+    # now do the same test with non-zero occulter radius
+    occulter = 0.8
+    # get a reference radial curve from direct calculation:
+    for i, sr in enumerate(source_radii):
+        mu1[i, :] = transfer_matrix.radial_lightcurve(distances=d, source_radius=sr, occulter_radius=occulter)
+
+    # get the same curves from the transfer matrix
+    for i, sr in enumerate(source_radii):
+        mu2[i, :] = matrix.radial_lightcurve(source=sr, distances=d, occulter_radius=occulter, get_offsets=False)
+
+    if not np.all(abs(mu1-mu2) < 0.01):  # maintain precision to within 1%
+        plt.legend()
+        plt.cla()
+        for i, sr in enumerate(source_radii):
+            plt.plot(d, mu2[i, :], '-o', label=f'source radius= {sr} (matrix)')
+
+        plt.gca().set_prop_cycle(None)
+        for i, sr in enumerate(source_radii):
+            plt.plot(d, mu1[i, :], '--x', label=f'source radius= {sr} (direct)')
+
+        plt.xlabel('Distance [Einstein radii]')
+        plt.ylabel('Magnification')
         plt.legend()
         plt.show(block=True)
 
@@ -75,7 +108,7 @@ def test_matrix_interpolation(matrix):
     source_radii = matrix.source_radii[[7, 14]]
     source_radii += np.random.random(source_radii.shape) * matrix.step_source  # offset a little bit
 
-    d = matrix.distances[0:10]
+    d = matrix.distances[0:30]
     d += np.random.random(d.shape) * matrix.step_dist  # offset a little bit
     mu1 = np.zeros((len(source_radii), d.size))
     mu2 = np.zeros((len(source_radii), d.size))
@@ -88,16 +121,24 @@ def test_matrix_interpolation(matrix):
     for i, sr in enumerate(source_radii):
         mu2[i, :] = matrix.radial_lightcurve(source=sr, distances=d, occulter_radius=0, get_offsets=False)
 
-    if not np.all(abs(mu1 - mu2) / mu2 < 0.01):  # maintain precision to within 1%
+    if not np.all(abs(mu1 - mu2) < 0.01):  # maintain precision to within 1%
         plt.legend()
         plt.cla()
+
         for i, sr in enumerate(source_radii):
             plt.plot(d, mu2[i, :], '-o', label=f'source radius= {sr} (matrix)')
+
+        plt.gca().set_prop_cycle(None)
+
+        for i, sr in enumerate(source_radii):
             plt.plot(d, mu1[i, :], '-x', label=f'source radius= {sr} (direct)')
+
+        plt.xlabel('Distance [Einstein radii]')
+        plt.ylabel('Magnification')
         plt.legend()
         plt.show(block=True)
 
-        raise ValueError(f'At least one point shows a different magnification of {np.max(abs(mu1 - mu2) / mu2)}')
+        raise ValueError(f'At least one point shows a different magnification of {np.max(abs(mu1 - mu2))}')
 
 
 def test_analytic_solution():
