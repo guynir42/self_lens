@@ -102,8 +102,8 @@ class TransferMatrix:
     """
 
     def __init__(self):
-        self.num_points = 1e5
-        self.num_pixels = 1e7
+        self.num_points = 1e6
+        self.num_pixels = 1e6
         self.min_dist = 0
         self.max_dist = 20
         self.step_dist = 0.1
@@ -244,37 +244,43 @@ class TransferMatrix:
                     resolution.append(resolution2)
 
                 # now go over one or two images and remove the occulter
+                changed_flag = np.ones(len(im), dtype=bool)
+                r_squared_grid = []
                 for m in range(len(im)):
+                    r_squared_grid.append(x_grid[m] ** 2 + y_grid[m] ** 2)
 
-                    r_squared_grid = x_grid[m] ** 2 + y_grid[m] ** 2
-
-                    for k, occulter_radius in enumerate(self.occulter_radii):
+                for k, occulter_radius in enumerate(self.occulter_radii):
+                    self.input_flux[k, j, i] = np.pi * source_radius ** 2
+                    for m in range(len(im)):
                         # t0 = timer()
-                        (im[m], changed_flag) = remove_occulter(
+                        (im[m], changed_flag[m]) = remove_occulter(
                             im[m],
                             occulter_radius,
-                            r_squared_grid,
-                            return_changed_flag=True
+                            r_squared_grid[m],
+                            return_changed_flag=True,
+                            plotting=False,
                         )
-                        # print(f'timer to remove occulter: {timer()-t0:.3f}s'); t0 = timer()
+                        # print(f'time to remove occulter: {timer()-t0:.3f}s');
 
-                        self.input_flux[k, j, i] = np.pi * source_radius ** 2
-
-                        if k == 0 or changed_flag:  # must calculate sums
-
+                    # t0 = timer()
+                    if k == 0 or np.any(changed_flag):  # must calculate sums
+                        for m in range(len(im)):
                             self.flux[k, j, i] += np.sum(im[m]) * 2 / resolution[m] ** 2
                             self.moment[k, j, i] += np.sum(im[m] * (x_grid[m] - d)) * 2 / resolution[m] ** 2
+                    else:  # neither image was changed
+                        self.flux[k, j, i] = self.flux[k - 1, j, i]
+                        self.moment[k, j, i] = self.moment[k - 1, j, i]
 
-                        else:
-                            self.flux[k, j, i] = self.flux[k - 1, j, i]
-                            self.moment[k, j, i] = self.moment[k - 1, j, i]
+                    # print(f'timer to calculate sums: {timer() - t0:.3f}s')
 
-                        # print(f'timer to calculate sums: {timer() - t0:.3f}s')
-
-                    if plotting:
-                        offset = self.moment[k, j, i] / self.flux[k, j, i]
-                        mag = self.flux[k, j, i] / self.input_flux[k, j, i]
-                        plot_geometry(im[0], x_grid[0], y_grid[0], source_radius, d, occulter_radius, mag, offset)
+                    for m in range(len(im)):
+                        if plotting:
+                            if self.flux[k, j, i]:
+                                offset = self.moment[k, j, i] / self.flux[k, j, i]
+                            else:
+                                offset = 0
+                            mag = self.flux[k, j, i] / self.input_flux[k, j, i]
+                            plot_geometry(im[m], x_grid[m], y_grid[m], source_radius, d, occulter_radius, mag, offset, pause_time=2)
 
             self.calc_time = timer() - t1
 
@@ -987,9 +993,10 @@ def make_surface_with_hole(
         raise RuntimeError(f'Number of transitions ({np.sum(np.diff(im2[:, 0])) }) is too high. '
                            f'Increase number of points on the circle. ')
 
+    im1 = skimage.morphology.binary_erosion(im1)
+
     im = np.bitwise_xor(im1, im2)
-    # im = np.bitwise_or(im1, im2)
-    im = skimage.morphology.binary_erosion(im)
+    # im = skimage.morphology.binary_erosion(im)
 
     # print(f'time to subtract/add images: {timer() - t0:.3f}s')
 
@@ -1052,6 +1059,7 @@ def remove_occulter(im, occulter_radius, r_squared_grid, plotting=False, return_
 
     if plotting:
         plt.imshow(im)
+        # plt.add_patch(plt.Circle((0, 0), ))
         plt.show()
 
     if return_changed_flag:
@@ -1360,6 +1368,7 @@ def point_source_approximation(distances):
         The magnification using the point-source approximation.
         The output is the same size as the "distances" input.
     """
+    # TODO: add the two sources separately and the occulter size that may block one or two of them
     sq = np.sqrt(1 + 4 / distances ** 2)
     return 0.5 * (sq + 1 / sq)
 
@@ -1409,58 +1418,14 @@ def large_source_approximation(distances, source_radius, occulter_radius=0, edge
 
 
 if __name__ == "__main__":
+    # T = TransferMatrix.from_file('saved/archive4/matrix_SR0.100-1.000_D0.000-10.000.npz')
+    # T2 = TransferMatrix.from_file('matrix.npz')
+    T3 = TransferMatrix.from_file('new_matrix.npz')
+    T4 = TransferMatrix.from_file('new_matrix2.npz')
+
+    plt.plot(T3.distances, T3.flux[0, 20, :], '-o', label='with erosion')
+    plt.plot(T4.distances, T4.flux[0, 20, :], '-o', label='without erosion')
+
     # mag = single_geometry(distance=9.5, source_radius=10, plotting=True, circle_points=1e5, pixels=1e5)
     # print(f'mag= {mag}')
 
-    source_radius = 2
-    occulter_radius = 0.8
-    d = np.linspace(source_radius * 0.0, source_radius * 1.9, 15)
-    # m1 = large_source_approximation(d, source_radius, occulter_radius, False)
-    m2 = large_source_approximation(d, source_radius, occulter_radius, True)
-    # m3 = radial_lightcurve(d, source_radius, occulter_radius, circle_points=1e5, pixels=1e5)
-    m4 = radial_lightcurve(d, source_radius, occulter_radius, circle_points=1e6, pixels=1e6)
-    m5 = radial_lightcurve(d, source_radius, occulter_radius, circle_points=1e7, pixels=1e7)
-
-    # plt.plot(d, source_radius ** 2 * (m1 - 1), label='simple approx')
-    plt.plot(d, source_radius ** 2 * (m2 - 1), label='elliptical approx')
-    # plt.plot(d, source_radius ** 2 * (m3 - 1), '-v', label='low-res simulation')
-    plt.plot(d, source_radius ** 2 * (m4 - 1), '-o', label='med-res simulation')
-    plt.plot(d, source_radius ** 2 * (m5 - 1), '-*', label='high-res simulation')
-    plt.legend()
-
-    # T = TransferMatrix.from_file('saved/matrix_SR0.100-1.000_D0.000-10.000.npz')
-    # d = np.linspace(0, 30, 300, endpoint=True)
-    # mag = T.radial_lightcurve(source=0.01, distances=d)
-    # plt.plot(d, mag, '*')
-    # plt.plot(d, point_source_approximation(d), '-')
-    # single_geometry(occulter_radius=1.4, source_radius=1.1, plotting=True, distance=1.2, circle_points=1e5)
-
-    # T = TransferMatrix()
-    # T.min_source = 0.1
-    # T.max_source = 2.0
-    # T.step_source = 0.1
-    # T.max_dist = 6
-    # T.step_dist = 0.1
-    # T.max_occulter = 3
-    # T.step_occulter = 0.1
-    # T.make_matrix()
-    # T.save()
-
-    # distance = 1.3
-    # source_radius = 2.0
-    # occulter_radius = 0.4
-    #
-    # t1 = timer()
-    # (z1x, z1y, z2x, z2y, height, width, x_axis, y_axis, internal, resolution) = draw_contours(distance, source_radius)
-    # t2 = timer()
-    # print(f"Draw contours: elapsed time is {t2 - t1}s. ")
-    #
-    # t1 = timer()
-    # (im, x_grid, y_grid) = make_surface(z1x, z1y, z2x, z2y, height, width, x_axis, y_axis, internal, resolution)
-    # t2 = timer()
-    # print(f"Make surface: elapsed time is {t2 - t1}s. ")
-    #
-    # t1 = timer()
-    # im2 = remove_occulter(im, occulter_radius, x_grid, y_grid)
-    # t2 = timer()
-    # print(f"Remove occulter: elapsed time is {t2 - t1}s. ")

@@ -24,8 +24,8 @@ T.max_dist = 3.0
 T.step_dist = 0.005
 T.max_occulter = 2.0
 T.step_occulter = 0.005
-T.num_pixels = 1e6
-T.num_points = 1e6
+T.num_pixels = 1e7
+T.num_points = 1e7
 
 if len(sys.argv) > 2:
     T.min_dist = float(sys.argv[1])

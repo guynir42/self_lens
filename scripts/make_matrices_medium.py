@@ -15,8 +15,8 @@ T.max_dist = 10.0
 T.step_dist = 0.025
 T.max_occulter = 5.0
 T.step_occulter = 0.025
-T.pixels = 1e6
-T.num_points = 1e6
+T.num_pixels = 1e7
+T.num_points = 1e7
 
 if len(sys.argv) > 2:
     T.min_dist = float(sys.argv[1])
@@ -24,7 +24,7 @@ if len(sys.argv) > 2:
 if len(sys.argv) > 3:
     T.step_dist = float(sys.argv[3])
 
-filename = f'saved/matrix_SR{T.min_source:.3f}-{T.max_source:.3f}_D{T.min_dist:.3f}-{T.max_dist:.3f}'
+filename = f'saved/fragments/matrix_SR{T.min_source:.3f}-{T.max_source:.3f}_D{T.min_dist:.3f}-{T.max_dist:.3f}'
 
 T.make_matrix()
 T.save(filename)
