@@ -58,7 +58,7 @@ class Survey:
         self.wavelength = None  # central wavelength (in nm)
         self.bandpass = None  # assume top-hat (in nm)
 
-        (self.wavelength, self.bandpass) = default_filter(self.filter)
+        (self.wavelength, self.bandpass) = simulator.default_filter(self.filter)
 
         if 'wavelength' in kwargs:
             self.wavelength = kwargs['wavelength']
@@ -288,36 +288,6 @@ def setup_default_survey(name, kwargs):
     for k, v in defaults[name].items():
         if k not in kwargs:
             kwargs[k] = v
-
-
-def default_filter(filter_name):
-    """
-    Return the central wavelength and bandpass (in nm) for some well known filters.
-    :param filter_name:
-        Name of the filter. Some common defaults are "V", "r", "i", "F500W".
-
-    :return:
-        A tuple of (wavelength, bandwidth), both in nm
-
-    reference: https://en.wikipedia.org/wiki/Photometric_system
-
-    """
-    filters = {
-        'U': (365, 66),
-        'B': (445, 94),
-        'G': (464, 128),
-        'V': (551, 88),
-        'R': (658, 138),
-        'I': (806, 149),
-        'F500W': (500, 200),
-    }
-    # TODO: make sure these numbers are correct!
-
-    if filter_name.upper() not in filters:
-        # raise KeyError(f'Unknonwn filter name "{filter_name}". Use "V" or "r" etc. ')
-        return None, None
-
-    return filters[filter_name.upper()]
 
 
 if __name__ == "__main__":

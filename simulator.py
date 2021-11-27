@@ -4,11 +4,12 @@ import glob
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.widgets import Button, TextBox
+
 from timeit import default_timer as timer
 import scipy.integrate as integ
 
 import transfer_matrix
-from survey import default_filter
 
 # TODO: add automatic white dwarf radius from https://github.com/mahollands/MR_relation
 # TODO: add automatic white dwarf radius from https://ui.adsabs.harvard.edu/abs/2002A%26A...394..489B/abstract eq (5)
@@ -27,7 +28,9 @@ from survey import default_filter
 class Simulator:
 
     def __init__(self):
+        self.gui = None  # fill this using make_gui()
         self.matrices = None  # list of matrices to use to produce the lightcurves
+        self.syst = None  # the latest system output
 
         self.latest_runtime = 0  # how much time it took to calculate a single lightcurve
         self.use_dilution = False  # automatically dilute the magnification with the companion flux
@@ -73,6 +76,17 @@ class Simulator:
         self.offset_angles = None
 
         self.load_matrices()
+
+        self.input_system(
+            star_mass=0.5,
+            star_size=0.5,
+            lens_mass=30,
+            lens_type='BH',
+            inclination=89.8,
+            semimajor_axis=0.1
+        )
+
+        self.output_system()
 
     @property
     def time_units(self):
@@ -326,16 +340,116 @@ class Simulator:
         return 2 * (ts[peak_idx] - ts[half_idx])
 
     def output_system(self):
+
         self.calc_lightcurve()
 
-        sys = System()
+        self.syst = System()
 
         # copy all relevant properties of this object
-        for k in sys.__dict__.keys():
+        for k in self.syst.__dict__.keys():
             if hasattr(self, k):
-                setattr(sys, k, getattr(self, k))
+                setattr(self.syst, k, getattr(self, k))
 
-        return sys
+        return self.syst
+
+    def make_gui(self):
+        self.gui = self.GUI(self)
+
+    class GUI:
+        def __init__(self, owner):
+            self.owner = owner
+            self.pars = {}  # parameters to be passed to owner
+            self.buttons = {}  # dictionary of name: GUI object (e.g., buttons, sliders, text boxes)
+            self.fig = None  # figure object
+            self.gs = None  # gridspec object
+            self.subfigs = None  # separate panels help build this up in a modular way
+            self.plot_fig = None  # a specific subfigure for display of plots
+            self.left_side_fig = None  # a shortcut to the left-side subfigure
+            self.auto_update = True  # if true, will also update the owner on every change
+            self.update_pars()
+            # these are specific for this type of GUI
+
+            # start building the subfigures and buttons
+            self.fig = plt.figure(num='Self lensing GUI', figsize=(15, 10), clear=True)
+            self.fig.canvas.mpl_disconnect(self.fig.canvas.manager.key_press_handler_id)
+            self.gs = self.fig.add_gridspec(ncols=3, nrows=3, width_ratios=[2, 8, 2], height_ratios=[3, 10, 1])
+            self.subfigs = []
+
+            # the plotting area
+            self.subfigs.append(self.fig.add_subfigure(self.gs[1, 1], facecolor='0.75'))
+            self.plot_fig = self.subfigs[-1]
+
+            # add buttons
+            # left side:
+            self.subfigs.append(self.fig.add_subfigure(self.gs[:, 0], facecolor='0.75'))
+            self.left_side_fig = self.subfigs[-1]
+
+            axes_left = self.subfigs[-1].subplots(12, 1)
+            self.add_button(axes_left[0], 'inclination', 'inclination= ', 'number')
+            # make sure all buttons and display are up to date
+            self.update_pars()
+            self.update_buttons()
+            self.update_display()
+
+        def add_button(self, axes, parameter, label=None, uitype='info', x0=None):
+            bbox = axes.get_position()
+            bbox.x0 = x0 if x0 is not None else 0.5
+            axes.set_position(bbox)
+
+            value = self.pars.get(parameter)  # default to None if missing key
+
+            if uitype == 'text' or uitype == 'number':
+
+                b = TextBox(axes, label, initial=str(value))
+
+                if uitype == 'text':
+                    def callback_input(text):
+                        self.pars[parameter] = text
+                        self.update()
+                if uitype == 'number':
+                    def callback_input(text):
+                        self.pars[parameter] = float(text)
+                        self.update()
+
+                b.on_submit(callback_input)
+
+            elif uitype == 'push':
+                b = Button(axes, label)
+            else:
+                raise KeyError(f'Unknown uitype ("{uitype}"). Try "push" or "toggle" or "input"')
+
+            self.buttons[parameter] = b
+            # self.pars[parameter] = value
+
+        def update(self):
+            self.left_side_fig.suptitle('Working...', fontsize='x-large')
+            self.left_side_fig.canvas.draw()
+            plt.show()
+            if self.auto_update:
+                self.update_owner()
+                self.update_pars()
+                self.update_display()
+            self.update_buttons()
+            self.left_side_fig.suptitle('', fontsize='x-large')
+
+        def update_owner(self):  # apply the values in pars to the owner and run code to reflect that
+            for k, v in self.pars.items():
+                if hasattr(self.owner, k):
+                    setattr(self.owner, k, v)
+            self.owner.calc_lightcurve()
+
+        def update_pars(self):  # get updated pars from the owner, after its code was run
+            self.pars = vars(self.owner)
+
+        def update_display(self):  # update the display from the owner's plotting tools
+            syst = self.owner.output_system()
+            syst.plot(fig=self.plot_fig)
+
+        def update_buttons(self):  # make sure the buttons all show what is saved in pars
+            pass
+
+
+
 
 
 class System:
@@ -463,28 +577,32 @@ class System:
 
         return abs_mag + 5 * np.log10(distance_pc / 10)
 
-    def plot(self, detection_limit=0.01, distance_pc=10):
+    def plot(self, detection_limit=0.01, distance_pc=10, fig=None, font_size=16):
 
-        fig, (ax1, ax2) = plt.subplots(1, 2)
-        ax1.plot(self.timestamps, self.magnifications, '-ob',
-                 label=f'magnification (max= {np.max(self.magnifications):.4f})')
-        ax1.set(
+        if fig is None:
+            fig, ax = plt.subplots(1, 2)
+        else:
+            ax = fig.subplots(2, 1)
+
+        ax[0].plot(self.timestamps, self.magnifications, '-ob',
+                   label=f'magnification (max= {np.max(self.magnifications):.4f})')
+        ax[0].set(
             xlabel=f'time [{self.time_units}]',
-            ylabel = 'magnification',
+            ylabel='magnification',
         )
 
         # show the detection limit
-        ax1.plot(self.timestamps, np.ones(self.magnifications.shape)*(1 + detection_limit),
-                 '--g', label=f'detection limit ({int(detection_limit * 100) : d}%)')
+        ax[0].plot(self.timestamps, np.ones(self.magnifications.shape)*(1 + detection_limit),
+                   '--g', label=f'detection limit ({int(detection_limit * 100) : d}%)')
 
         # show the region above the limit
         idx = self.magnifications - 1 > detection_limit
         if np.any(idx):
             width = max(self.timestamps[idx]) - min(self.timestamps[idx])
-            ax1.plot(self.timestamps[idx], self.magnifications[idx], '-or',
+            ax[0].plot(self.timestamps[idx], self.magnifications[idx], '-or',
                      label=f'event time ({width:.1f} {self.time_units})')
 
-        legend_handles, legend_labels = ax1.get_legend_handles_labels()
+        legend_handles, legend_labels = ax[0].get_legend_handles_labels()
 
         # add the period to compare to the flare time
         legend_handles.append(Line2D([0], [0], lw=0))
@@ -504,13 +622,13 @@ class System:
 
         legend_labels.append(f'Mag (at {int(distance_pc):d}pc):\n R~{mag_R:4.2f}\n V~{mag_V:4.2f}\n B~{mag_B:4.2f} ')
 
-        ax1.legend(legend_handles, legend_labels, bbox_to_anchor=(1.00, 0.95), loc="upper right")
+        ax[0].legend(legend_handles, legend_labels, bbox_to_anchor=(1.00, 0.95), loc="upper right")
 
         # add a cartoon of the system in a subplot
-        ax1.set(position=[0.0, 0.0, 1.6, 1.0])
-        ax2.set(position=[0.15, -0.05, 0.45, 0.75])
-        ax2.axes.xaxis.set_visible(False)
-        ax2.axes.yaxis.set_visible(False)
+        ax[0].set(position=[0.1, 0.1, 0.85, 0.85])
+        ax[1].set(position=[0.15, 0.45, 0.3, 0.25])
+        ax[1].axes.xaxis.set_visible(False)
+        ax[1].axes.yaxis.set_visible(False)
 
         # set the scale of the cartoon (for the object sizes at least)
         scale = max(self.star_size, self.einstein_radius)
@@ -519,36 +637,37 @@ class System:
         solar_radii = '$R_\u2609$'
         star_label = f'source size= {self.star_size:4.3f}{solar_radii}'
         star = plt.Circle((-2, 0), self.star_size / scale, color=get_star_plot_color(self.star_temp), label=star_label)
-        ax2.set_xlim((-3.2, 3.2))
-        ax2.set_ylim((-1.5, 1.5))
-        ax2.set_aspect("equal")
-        ax2.add_patch(star)
+        ax[1].set_xlim((-3.2, 3.2))
+        ax[1].set_ylim((-1.5, 1.5))
+        ax[1].set_aspect("equal")
+        ax[1].add_patch(star)
 
         # add the lensing object
         lens_label = f'occulter size= {self.lens_size:4.3f}{solar_radii}'
+        lt = self.lens_type.strip().upper()
 
-        if self.lens_type == 'WD':
+        if lt == 'WD':
             lens = plt.Circle((2, 0), self.lens_size / scale, color=get_star_plot_color(self.lens_temp), label=lens_label)
-        elif self.lens_type == 'NS':
+        elif lt == 'NS':
             lens = plt.Circle((2, 0), 0.1, color=get_star_plot_color(self.lens_temp), label=lens_label)
-        elif self.lens_type == 'BH':
+        elif lt == 'BH':
             lens = plt.Circle((2, 0), 0.05, color='black', label=lens_label)
         else:
             raise KeyError(f'Unknown lens type ("{self.lens_type}"). Try using "WD" or "BH"... ')
 
-        ax2.add_patch(lens)
+        ax[1].add_patch(lens)
 
         # add the Einstein ring
         ring = plt.Circle((2, 0), self.einstein_radius / scale, color='r', linestyle=':', fill=False,
                           label=f'Einstein radius= {self.einstein_radius:4.3f}{solar_radii}')
-        ax2.add_patch(ring)
+        ax[1].add_patch(ring)
 
         phi = np.linspace(0, 2*np.pi, 1000)
         x = 2*np.cos(phi)
         y = 2*np.sin(phi) * np.sin(np.pi / 180 * (90 - self.inclination) * 50)
-        ax2.plot(x, y, '--k', label=f'a= {self.semimajor_axis}AU, i={self.inclination}$^\circ$')
+        ax[1].plot(x, y, '--k', label=f'a= {self.semimajor_axis}AU, i={self.inclination}$^\circ$')
 
-        legend_handles, legend_labels = ax2.get_legend_handles_labels()
+        legend_handles, legend_labels = ax[1].get_legend_handles_labels()
         # replace the legend marker for the WD star
         legend_handles[1] = Line2D([0], [0], lw=0, marker='o', color=get_star_plot_color(self.lens_temp))
         legend_handles[2] = Line2D([0], [0], marker='o', lw=0, color=get_star_plot_color(self.star_temp))
@@ -558,8 +677,10 @@ class System:
         # legend_handles = [legend_handles[i] for i in order]
         # legend_labels = [legend_labels[i] for i in order]
 
-        ax2.legend(legend_handles, legend_labels,
-                   bbox_to_anchor=(-0.3, 1.04), loc="lower left")
+        ax[1].legend(legend_handles, legend_labels,
+                   bbox_to_anchor=(0.5, 1.04), loc="lower center")
+
+        return ax
 
 
 def translate_time_units(units):
@@ -586,13 +707,42 @@ def get_star_plot_color(temp):
     return cmp((lim2 - temp) / (lim2 - lim1) + push_low)
 
 
+def default_filter(filter_name):
+    """
+    Return the central wavelength and bandpass (in nm) for some well known filters.
+    :param filter_name:
+        Name of the filter. Some common defaults are "V", "r", "i", "F500W".
+
+    :return:
+        A tuple of (wavelength, bandwidth), both in nm
+
+    reference: https://en.wikipedia.org/wiki/Photometric_system
+
+    """
+    filters = {
+        'U': (365, 66),
+        'B': (445, 94),
+        'G': (464, 128),
+        'V': (551, 88),
+        'R': (658, 138),
+        'I': (806, 149),
+        'F500W': (500, 200),
+    }
+    # TODO: make sure these numbers are correct!
+
+    if filter_name.upper() not in filters:
+        # raise KeyError(f'Unknonwn filter name "{filter_name}". Use "V" or "r" etc. ')
+        return None, None
+
+    return filters[filter_name.upper()]
+
 if __name__ == "__main__":
 
     s = Simulator()
-    s.load_matrices()
-    s.calc_lightcurve(star_mass=0.5, star_size=0.5, lens_mass=30, lens_type='BH ', inclination=89.8, semimajor_axis=0.01)
-    syst = s.output_system()
-    syst.plot()
+    s.make_gui()
+    # s.calc_lightcurve(star_mass=0.5, star_size=0.5, lens_mass=30, lens_type='BH ', inclination=89.8, semimajor_axis=0.1)
+    # syst = s.output_system()
+    # syst.plot()
 
     # d = s.position_radii[::2]
     # mag1 = transfer_matrix.radial_lightcurve(
