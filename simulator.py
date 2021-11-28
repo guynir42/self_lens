@@ -360,6 +360,8 @@ class Simulator:
             self.owner = owner
             self.pars = {}  # parameters to be passed to owner
             self.buttons = {}  # dictionary of name: GUI object (e.g., buttons, sliders, text boxes)
+            self.button_axes = {}  # dictionary of name: object axes (the axes containing buttons, etc)
+            self.axes_button = {}  # reverse dictionary of above: keys are axes and values are parameter names
             self.fig = None  # figure object
             self.gs = None  # gridspec object
             self.subfigs = None  # separate panels help build this up in a modular way
@@ -385,51 +387,88 @@ class Simulator:
             self.left_side_fig = self.subfigs[-1]
 
             axes_left = self.subfigs[-1].subplots(12, 1)
-            self.add_button(axes_left[0], 'inclination', 'inclination= ', 'number')
+            ind = 0
+            self.add_button(axes_left[ind], 'toggle', 'auto_update'); ind += 1
+            self.add_button(axes_left[ind], 'number', 'inclination'); ind += 1
             # make sure all buttons and display are up to date
             self.update_pars()
             self.update_buttons()
             self.update_display()
 
-        def add_button(self, axes, parameter, label=None, uitype='info', x0=None):
+        def add_button(self, axes, uitype, parameter, label=None, x0=None):
+
+            if label is None:
+                label = parameter.replace('_', ' ') + '='
+
             bbox = axes.get_position()
             bbox.x0 = x0 if x0 is not None else 0.5
             axes.set_position(bbox)
 
             value = self.pars.get(parameter)  # default to None if missing key
 
-            if uitype == 'text' or uitype == 'number':
+            if uitype == 'toggle':
+                b = Button(axes, str(value))
+                axes.text(0, 0.5, label, ha='right', va='center', transform=axes.transAxes)
 
+                def callback_toggle(event):
+                    parameter = self.axes_button[event.inaxes]
+                    self.toggle_activation(parameter)
+
+                b.on_clicked(callback_toggle)
+
+            elif uitype == 'text' or uitype == 'number':
                 b = TextBox(axes, label, initial=str(value))
-
                 if uitype == 'text':
                     def callback_input(text):
-                        self.pars[parameter] = text
-                        self.update()
+                        value = text
+                        self.input_activation(parameter, value)
                 if uitype == 'number':
                     def callback_input(text):
-                        self.pars[parameter] = float(text)
-                        self.update()
+                        value = float(text)
+                        self.input_activation(parameter, value)
 
                 b.on_submit(callback_input)
 
             elif uitype == 'push':
                 b = Button(axes, label)
+                # TODO: need to finish this
             else:
                 raise KeyError(f'Unknown uitype ("{uitype}"). Try "push" or "toggle" or "input"')
 
             self.buttons[parameter] = b
+            self.button_axes[parameter] = axes
+            self.axes_button[axes] = parameter
             # self.pars[parameter] = value
+
+        def toggle_activation(self, parameter):
+            self.pars[parameter] = not self.pars[parameter]
+            button = self.buttons[parameter]
+            button.label.set_text(str(self.pars[parameter]))
+            self.update()
+
+        def input_activation(self, parameter, value):
+            if self.pars[parameter] != value:
+                self.pars[parameter] = value
+                self.update()
 
         def update(self):
             self.left_side_fig.suptitle('Working...', fontsize='x-large')
             self.left_side_fig.canvas.draw()
-            plt.show()
+            self.auto_update = self.pars['auto_update']
             if self.auto_update:
+                # t0 = timer()
                 self.update_owner()
+                # print(f'time to update owner= {timer() - t0:.1f}s')
+                # t0 = timer()
                 self.update_pars()
+                # print(f'time to update pars= {timer() - t0:.1f}s')
+                # t0 = timer()
                 self.update_display()
+                # print(f'time to update display= {timer() - t0:.1f}s')
+            # t0 = timer()
             self.update_buttons()
+            # print(f'time to update buttons= {timer() - t0:.1f}s')
+
             self.left_side_fig.suptitle('', fontsize='x-large')
 
         def update_owner(self):  # apply the values in pars to the owner and run code to reflect that
@@ -440,6 +479,9 @@ class Simulator:
 
         def update_pars(self):  # get updated pars from the owner, after its code was run
             self.pars = vars(self.owner)
+
+            # add GUI parameters here on to of owner parameters
+            self.pars['auto_update'] = self.auto_update
 
         def update_display(self):  # update the display from the owner's plotting tools
             syst = self.owner.output_system()
