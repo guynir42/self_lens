@@ -4,7 +4,7 @@ import glob
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib.widgets import Button, TextBox
+from matplotlib.widgets import Button, TextBox, Slider
 
 from timeit import default_timer as timer
 import scipy.integrate as integ
@@ -77,7 +77,7 @@ class Simulator:
 
         self.load_matrices()
 
-        self.input_system(
+        self.calculate(
             star_mass=0.5,
             star_size=0.5,
             lens_mass=30,
@@ -86,7 +86,6 @@ class Simulator:
             semimajor_axis=0.1
         )
 
-        self.output_system()
 
     @property
     def time_units(self):
@@ -163,7 +162,7 @@ class Simulator:
 
         return temp, size, flux
 
-    def input_system(self, **kwargs):
+    def input(self, **kwargs):
 
         for key, val in kwargs.items():
             if hasattr(self, key) and re.match('(star|lens)_.*', key) or key == 'inclination' or key == 'semimajor_axis' or key == 'time_units':
@@ -209,7 +208,7 @@ class Simulator:
         self.source_size = self.star_size / self.einstein_radius
         self.occulter_size = self.lens_size / self.einstein_radius
 
-    def input_timestamps(self, timestamps=None, units=None):
+    def ingest_timestamps(self, timestamps=None, units=None):
 
         if timestamps is not None:
             self.timestamps = timestamps
@@ -266,7 +265,7 @@ class Simulator:
 
         return width / velocity
 
-    def calc_lightcurve(self, **kwargs):
+    def calculate(self, **kwargs):
 
         t0 = timer()
         if 'timestamps' in kwargs:
@@ -280,16 +279,18 @@ class Simulator:
             time_units = None
 
         if kwargs:
-            self.input_system(**kwargs)
+            self.input(**kwargs)
+        else:
+            self.input()
 
         if timestamps is not None or time_units is not None:
-            self.input_timestamps(timestamps, time_units)
+            self.ingest_timestamps(timestamps, time_units)
 
         if self.timestamps is None:
             # time_range = 0.01 * self.orbital_period * 3600
             time_range = 8 * self.crossing_time()
             timestamps = np.linspace(-time_range, time_range, 201, endpoint=True)
-            self.input_timestamps(timestamps / translate_time_units(self.time_units), self.time_units)
+            self.ingest_timestamps(timestamps / translate_time_units(self.time_units), self.time_units)
 
         # first check if the requested source size is lower/higher than any matrix
         max_sizes = np.array([mat.max_source for mat in self.matrices])
@@ -321,13 +322,20 @@ class Simulator:
             total_flux = self.star_flux + self.lens_flux
             self.magnifications = (self.star_flux * self.magnifications + self.lens_flux) / total_flux
 
-        self.fwhm = self.calc_fwhm()
+        self.fwhm = self.get_fwhm()
 
         self.latest_runtime = timer() - t0
 
+        self.syst = System()
+
+        # copy all relevant properties of this object
+        for k in self.syst.__dict__.keys():
+            if hasattr(self, k):
+                setattr(self.syst, k, getattr(self, k))
+
         return self.magnifications
 
-    def calc_fwhm(self):
+    def get_fwhm(self):
 
         lc = self.magnifications - 1
         ts = self.timestamps
@@ -339,29 +347,106 @@ class Simulator:
 
         return 2 * (ts[peak_idx] - ts[half_idx])
 
-    def output_system(self):
-
-        self.calc_lightcurve()
-
-        self.syst = System()
-
-        # copy all relevant properties of this object
-        for k in self.syst.__dict__.keys():
-            if hasattr(self, k):
-                setattr(self.syst, k, getattr(self, k))
-
-        return self.syst
-
     def make_gui(self):
         self.gui = self.GUI(self)
+
+    class GraphicButton:
+        def __init__(self, gui, axes, uitype, parameter, label=None, dx=None, altdata=None):
+            self.gui = gui  # link back to the GUI object that owns this object
+            self.par_of_gui = False  # is the parameter associated with this GUI (=True) or with its owner (=False)
+            self.button = None  # the ui-object
+            self.uitype = uitype  # can be "info", "toggle", "text", "number", "slider", "push", etc
+            self.axes = axes  # the axes the ui-object is drawn on
+            self.parameter = parameter
+            self.label = label if label is not None else parameter.replace('_', ' ') + '='
+            self.use_log = False  # plot the sliders using a logarithmic scale
+
+            if uitype in ('toggle', 'text', 'number', 'slider'):
+                bbox = axes.get_position()
+                dx = dx if dx is not None else 0.5
+                bbox.x0 += dx * bbox.width
+                axes.set_position(bbox)
+            if uitype in ('slider'):
+                bbox = axes.get_position()
+                bbox.x1 = 0.75
+                h = bbox.height
+                bbox.y0 += h * 0.4
+                bbox.y1 -= h * 0.4
+                axes.set_position(bbox)
+
+            value = self.gui.pars.get(parameter)  # default to None if missing key
+
+            if self.uitype == 'toggle':
+                self.button = Button(axes, str(value))
+                self.axes.text(0, 0.5, self.label, ha='right', va='center', transform=self.axes.transAxes)
+
+                def callback_toggle(event):
+                    self.gui.toggle_activation(self.parameter, self.button)
+
+                self.button.on_clicked(callback_toggle)
+
+            elif uitype in ('text', 'number'):
+                self.button = TextBox(self.axes, self.label, initial=str(value))
+                if uitype == 'text':
+                    def callback_input(text):
+                        new_value = text
+                        self.gui.input_activation(self.parameter, self.button, new_value)
+                if uitype == 'number':
+                    def callback_input(text):
+                        new_value = float(text)
+                        self.gui.input_activation(self.parameter, self.button, new_value)
+
+                self.button.on_submit(callback_input)
+            elif uitype == 'slider':
+                lower = altdata[0]
+                upper = altdata[1]
+                if len(altdata) > 2:
+                    self.use_log = altdata[2]
+
+                if self.use_log:
+                    self.button = Slider(ax=self.axes, label=self.label, valmin=np.log10(lower), valmax=np.log10(upper), valinit=np.log10(value))
+                else:
+                    self.button = Slider(ax=self.axes, label=self.label, valmin=lower, valmax=upper, valinit=value)
+
+                def callback_input(new_value):
+                    if self.use_log:
+                        new_value = 10 ** new_value
+                    self.gui.input_activation(self.parameter, self.button, new_value)
+
+                self.button.on_changed(callback_input)
+
+            elif uitype == 'push':
+                b = Button(axes, label)
+                # TODO: need to finish this
+
+            else:
+                raise KeyError(f'Unknown uitype ("{uitype}"). Try "push" or "toggle" or "input"')
+
+        def update(self):
+            value = self.gui.pars[self.parameter]
+            if self.uitype == 'toggle':
+                self.button.label.set_text(str(value))
+            elif self.uitype == 'text':
+                self.button.text_disp.set_text(value)
+            elif self.uitype == 'number':
+                self.button.text_disp.set_text(str(round(value, 4)))
+            elif self.uitype == 'slider':
+                if self.use_log:
+                    value = np.log10(value)
+                    self.button.set_val(value)
+                    self.button.valtext.set_text(str(round(10 ** value, 2)))
+                else:
+                    self.button.set_val(value)
+
 
     class GUI:
         def __init__(self, owner):
             self.owner = owner
             self.pars = {}  # parameters to be passed to owner
-            self.buttons = {}  # dictionary of name: GUI object (e.g., buttons, sliders, text boxes)
-            self.button_axes = {}  # dictionary of name: object axes (the axes containing buttons, etc)
-            self.axes_button = {}  # reverse dictionary of above: keys are axes and values are parameter names
+            self.buttons = []  # a list of GraphicButton objects for all input/info/action buttons
+            # self.buttons = {}  # dictionary of name: GUI object (e.g., buttons, sliders, text boxes)
+            # self.button_axes = {}  # dictionary of name: object axes (the axes containing buttons, etc)
+            # self.axes_button = {}  # reverse dictionary of above: keys are axes and values are parameter names
             self.fig = None  # figure object
             self.gs = None  # gridspec object
             self.subfigs = None  # separate panels help build this up in a modular way
@@ -390,63 +475,24 @@ class Simulator:
             ind = 0
             self.add_button(axes_left[ind], 'toggle', 'auto_update'); ind += 1
             self.add_button(axes_left[ind], 'number', 'inclination'); ind += 1
+            self.add_button(axes_left[ind], 'slider', 'inclination', '', 0, (89.0, 90.0)); ind += 1
+            self.add_button(axes_left[ind], 'number', 'semimajor_axis'); ind += 1
+            self.add_button(axes_left[ind], 'slider', 'semimajor_axis', '', 0, (0.01, 10, True)); ind += 1
+
             # make sure all buttons and display are up to date
             self.update_pars()
             self.update_buttons()
             self.update_display()
 
-        def add_button(self, axes, uitype, parameter, label=None, x0=None):
+        def add_button(self, axes, uitype, parameter, label=None, dx=None, altdata=None):
+            self.buttons.append(Simulator.GraphicButton(self, axes, uitype, parameter, label, dx, altdata))
 
-            if label is None:
-                label = parameter.replace('_', ' ') + '='
-
-            bbox = axes.get_position()
-            bbox.x0 = x0 if x0 is not None else 0.5
-            axes.set_position(bbox)
-
-            value = self.pars.get(parameter)  # default to None if missing key
-
-            if uitype == 'toggle':
-                b = Button(axes, str(value))
-                axes.text(0, 0.5, label, ha='right', va='center', transform=axes.transAxes)
-
-                def callback_toggle(event):
-                    parameter = self.axes_button[event.inaxes]
-                    self.toggle_activation(parameter)
-
-                b.on_clicked(callback_toggle)
-
-            elif uitype == 'text' or uitype == 'number':
-                b = TextBox(axes, label, initial=str(value))
-                if uitype == 'text':
-                    def callback_input(text):
-                        value = text
-                        self.input_activation(parameter, value)
-                if uitype == 'number':
-                    def callback_input(text):
-                        value = float(text)
-                        self.input_activation(parameter, value)
-
-                b.on_submit(callback_input)
-
-            elif uitype == 'push':
-                b = Button(axes, label)
-                # TODO: need to finish this
-            else:
-                raise KeyError(f'Unknown uitype ("{uitype}"). Try "push" or "toggle" or "input"')
-
-            self.buttons[parameter] = b
-            self.button_axes[parameter] = axes
-            self.axes_button[axes] = parameter
-            # self.pars[parameter] = value
-
-        def toggle_activation(self, parameter):
+        def toggle_activation(self, parameter, button):
             self.pars[parameter] = not self.pars[parameter]
-            button = self.buttons[parameter]
             button.label.set_text(str(self.pars[parameter]))
             self.update()
 
-        def input_activation(self, parameter, value):
+        def input_activation(self, parameter, button, value):
             if self.pars[parameter] != value:
                 self.pars[parameter] = value
                 self.update()
@@ -475,23 +521,22 @@ class Simulator:
             for k, v in self.pars.items():
                 if hasattr(self.owner, k):
                     setattr(self.owner, k, v)
-            self.owner.calc_lightcurve()
+            self.owner.calculate()
 
         def update_pars(self):  # get updated pars from the owner, after its code was run
             self.pars = vars(self.owner)
 
-            # add GUI parameters here on to of owner parameters
+            # add GUI parameters here on top of owner parameters
             self.pars['auto_update'] = self.auto_update
 
         def update_display(self):  # update the display from the owner's plotting tools
-            syst = self.owner.output_system()
-            syst.plot(fig=self.plot_fig)
+            axes = self.plot_fig.axes
+            [self.plot_fig.delaxes(ax) for ax in axes]
+            self.owner.syst.plot(fig=self.plot_fig)
 
         def update_buttons(self):  # make sure the buttons all show what is saved in pars
-            pass
-
-
-
+            for b in self.buttons:
+                b.update()
 
 
 class System:
@@ -782,7 +827,7 @@ if __name__ == "__main__":
 
     s = Simulator()
     s.make_gui()
-    # s.calc_lightcurve(star_mass=0.5, star_size=0.5, lens_mass=30, lens_type='BH ', inclination=89.8, semimajor_axis=0.1)
+    # s.calculate(star_mass=0.5, star_size=0.5, lens_mass=30, lens_type='BH ', inclination=89.8, semimajor_axis=0.1)
     # syst = s.output_system()
     # syst.plot()
 

@@ -296,7 +296,7 @@ if __name__ == "__main__":
 
     sim = simulator.Simulator()
     sim.load_matrices()
-    sim.calc_lightcurve(
+    sim.calculate(
         lens_mass=30,
         lens_type='BH',
         lens_temp=5000,
@@ -309,8 +309,8 @@ if __name__ == "__main__":
         semimajor_axis=1,
         time_units='hours',
     )
-    syst = sim.output_system()
-    syst.plot()
+
+    sim.syst.plot()
 
     ztf = Survey('ztf')
     ztf.series_length = 1
@@ -319,10 +319,11 @@ if __name__ == "__main__":
     # ztf.wavelength = None
     # print(f'S/N= {ztf.det_prob(syst)}s')
 
-    ztf.effective_volume(syst)
-    if len(syst.total_prob):
-        print(f'mean prob= {np.mean(syst.total_prob["ztf"]):.2e} | max dist= {max(syst.distances["ztf"]):.2f} pc | '
-              f'volume: {np.sum(syst.total_volumes["ztf"]):.2e} pc^3 | '
-              f'effective vol.= {syst.effective_volumes["ztf"]:.2e} pc^3')
+    ztf.effective_volume(sim.syst)
+    if len(sim.syst.total_prob):
+        print(f'mean prob= {np.mean(sim.syst.total_prob["ztf"]):.2e} | '
+              f'max dist= {max(sim.syst.distances["ztf"]):.2f} pc | '
+              f'volume: {np.sum(sim.syst.total_volumes["ztf"]):.2e} pc^3 | '
+              f'effective vol.= {sim.syst.effective_volumes["ztf"]:.2e} pc^3')
     else:
-        print('Object is too faint to observe. ')
+        print('Object is too faint to observe.')
