@@ -48,6 +48,7 @@ provided an impact parameter and velocity of the lens.
 All units are normalized to the Einstein radius.
 """
 
+
 class TransferMatrix:
     """
     The TransferMatrix is used to pre-calculate the magnification
@@ -1418,13 +1419,12 @@ def large_source_approximation(distances, source_radius, occulter_radius=0, edge
 
 
 if __name__ == "__main__":
-    # T = TransferMatrix.from_file('saved/archive4/matrix_SR0.100-1.000_D0.000-10.000.npz')
-    # T2 = TransferMatrix.from_file('matrix.npz')
-    T3 = TransferMatrix.from_file('new_matrix.npz')
-    T4 = TransferMatrix.from_file('new_matrix2.npz')
+    T = TransferMatrix.from_file('matrix.npz')
+    d = T.distances
+    d += np.random.random(d.shape) * T.step_dist  # offset a little bit
 
-    plt.plot(T3.distances, T3.flux[0, 20, :], '-o', label='with erosion')
-    plt.plot(T4.distances, T4.flux[0, 20, :], '-o', label='without erosion')
+    plt.plot(d, T.radial_lightcurve(distances=d, source=0.5), 'o')
+    plt.plot(T.distances, T.radial_lightcurve(source=0.5), ':x')
 
     # mag = single_geometry(distance=9.5, source_radius=10, plotting=True, circle_points=1e5, pixels=1e5)
     # print(f'mag= {mag}')

@@ -58,7 +58,7 @@ def test_matrix_vs_direct_calculation(matrix):
     for i, sr in enumerate(source_radii):
         mu2[i, :] = matrix.radial_lightcurve(source=sr, distances=d, occulter_radius=0, get_offsets=False)
 
-    if not np.all(abs(mu1-mu2) < 0.01):  # maintain precision to within 1%
+    if not np.all(abs(mu1-mu2)/ mu1 < 0.01):  # maintain precision to within 1%
         plt.legend()
         plt.cla()
         for i, sr in enumerate(source_radii):
@@ -73,7 +73,7 @@ def test_matrix_vs_direct_calculation(matrix):
         plt.legend()
         plt.show(block=True)
 
-        raise ValueError(f'At least one point shows a different magnification of {np.max(abs(mu1-mu2))}')
+        raise ValueError(f'At least one point shows a different magnification of {np.max(abs(mu1-mu2) / mu1)}')
 
     # now do the same test with non-zero occulter radius
     occulter = 0.8
@@ -85,7 +85,7 @@ def test_matrix_vs_direct_calculation(matrix):
     for i, sr in enumerate(source_radii):
         mu2[i, :] = matrix.radial_lightcurve(source=sr, distances=d, occulter_radius=occulter, get_offsets=False)
 
-    if not np.all(abs(mu1-mu2) < 0.01):  # maintain precision to within 1%
+    if not np.all(abs(mu1-mu2) / mu1 < 0.01):  # maintain precision to within 1%
         plt.legend()
         plt.cla()
         for i, sr in enumerate(source_radii):
@@ -100,15 +100,15 @@ def test_matrix_vs_direct_calculation(matrix):
         plt.legend()
         plt.show(block=True)
 
-        raise ValueError(f'At least one point shows a different magnification of {np.max(abs(mu1-mu2))}')
+        raise ValueError(f'At least one point shows a different magnification of {np.max(abs(mu1-mu2) / mu1)}')
 
 
 def test_matrix_interpolation(matrix):
 
-    source_radii = matrix.source_radii[[7, 14]]
+    source_radii = np.copy(matrix.source_radii[[7, 14]])
     source_radii += np.random.random(source_radii.shape) * matrix.step_source  # offset a little bit
 
-    d = matrix.distances[0:30]
+    d = np.copy(matrix.distances[0:30])
     d += np.random.random(d.shape) * matrix.step_dist  # offset a little bit
     mu1 = np.zeros((len(source_radii), d.size))
     mu2 = np.zeros((len(source_radii), d.size))
@@ -121,8 +121,7 @@ def test_matrix_interpolation(matrix):
     for i, sr in enumerate(source_radii):
         mu2[i, :] = matrix.radial_lightcurve(source=sr, distances=d, occulter_radius=0, get_offsets=False)
 
-    if not np.all(abs(mu1 - mu2) < 0.01):  # maintain precision to within 1%
-        plt.legend()
+    if not np.all(abs(mu1 - mu2) / mu1 < 0.05):  # maintain precision to within 5%
         plt.cla()
 
         for i, sr in enumerate(source_radii):
@@ -138,7 +137,7 @@ def test_matrix_interpolation(matrix):
         plt.legend()
         plt.show(block=True)
 
-        raise ValueError(f'At least one point shows a different magnification of {np.max(abs(mu1 - mu2))}')
+        raise ValueError(f'At least one point shows a different magnification of {np.max(abs(mu1 - mu2) / mu1)}')
 
 
 def test_analytic_solution():
@@ -247,7 +246,7 @@ def test_numerical_calculation():
     assert abs(mag - magnification_disk_touching) < 0.25  # close enough
 
 
-def test_elliptical_large_source(matrix):
+def test_elliptical_large_source(matrix_large):
 
     # test a large source against the direct calculation
     source_radius = 10.0
@@ -280,12 +279,11 @@ def test_elliptical_large_source(matrix):
         raise ValueError(f'At least one point shows a different magnification of {np.max(abs(mag_direct - mag_approx))}')
 
     # test a medium source against the matrix
-    # test a large source against the direct calculation
     source_radius = 2.0
     occulter_radius = 0.0
     d = np.linspace(0, source_radius * 1.5, 18)
     mag_approx = transfer_matrix.large_source_approximation(d, source_radius, occulter_radius)
-    mag_direct = matrix.radial_lightcurve(source_radius, d, occulter_radius)
+    mag_direct = matrix_large.radial_lightcurve(source_radius, d, occulter_radius)
 
     # still ballpark but not very accurate for small sources
     if not np.all(np.abs(mag_direct - mag_approx) < 0.3) or not np.all(np.abs(mag_direct - mag_approx) > 0.01):
@@ -294,9 +292,10 @@ def test_elliptical_large_source(matrix):
         plt.plot(d, mag_direct, '-x', label='direct')
         plt.legend()
         plt.show(block=True)
-
-        raise ValueError(f'At least one point shows a different magnification of {np.max(abs(mag_direct - mag_approx))}')
-
+        if not np.all(np.abs(mag_direct - mag_approx) < 0.3):
+            raise ValueError(f'At least one point shows a different magnification of {np.max(abs(mag_direct - mag_approx))}')
+        if not np.all(np.abs(mag_direct - mag_approx) > 0.01):
+            raise ValueError(f'At least one point shows a different magnification of {np.min(abs(mag_direct - mag_approx))}')
 
 def test_addition(counting_matrix, counting_matrix_dist1, counting_matrix_dist2):
     # check the null combination of matrix with new (empty) matrix

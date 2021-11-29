@@ -2,9 +2,10 @@ import os
 import re
 import glob
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib.widgets import Button, TextBox, Slider
+from matplotlib.widgets import Button, TextBox, Slider, RadioButtons
 
 from timeit import default_timer as timer
 import scipy.integrate as integ
@@ -35,11 +36,6 @@ class Simulator:
         self.latest_runtime = 0  # how much time it took to calculate a single lightcurve
         self.use_dilution = False  # automatically dilute the magnification with the companion flux
 
-        self._default_star_type = 'WD'
-        self._default_lens_type = 'WD'
-        self._default_semimajor_axis = 1  # in AU
-        self._default_inclination = 90  # edge on
-
         # lensing parameters (in units of Einstein radius)
         self.einstein_radius = None  # in Solar units, to translate the input
         self.impact_parameter = None
@@ -48,18 +44,21 @@ class Simulator:
         self.occulter_size = None
 
         # physical parameters (in Solar units)
-        self.semimajor_axis = None  # in AU
-        self.inclination = None  # orbital inclination (degrees)
-        self.star_mass = None  # in Solar mass units
-        self.star_type = None  # what kind of object: "star", "WD", "NS", "BH"
-        self.star_temp = None  # in Kelvin
-        self.star_size = None  # in Solar radius units
-        self.star_flux = None  # relative brightness in any units you want
-        self.lens_mass = None  # in Solar mass units
-        self.lens_type = None  # what kind of object: "star", "WD", "NS", "BH"
-        self.lens_temp = None  # in Kelvin
-        self.lens_size = None  # in Solar radius units
-        self.lens_flux = None  # relative brightness in any units you want
+        self.semimajor_axis = 1  # in AU
+        self.inclination = 90  # orbital inclination (degrees)
+        self.compact_source = True  # is the source a compact object or a main sequence star?
+        self.star_mass = 1  # in Solar mass units
+        self.star_temp = 5000  # in Kelvin
+        # use the following hidden properties to override the calculated type, size and flux
+        self._star_type = None  # what kind of object: "star", "WD", "NS", "BH"
+        self._star_size = None  # in Solar radius units
+        self._star_flux = None  # luminosity in ergs/s
+        self.lens_mass = 1  # in Solar mass units
+        self.lens_temp = 5000  # in Kelvin
+        # use the following hidden properties to override the calculated type, size and flux
+        self._lens_type = None  # what kind of object: "star", "WD", "NS", "BH"
+        self._lens_size = None  # in Solar radius units
+        self._lens_flux = None  # luminosity in ergs/s
 
         # measurement inputs
         self.timestamps = None  # times measured from closest approach
@@ -77,15 +76,83 @@ class Simulator:
 
         self.load_matrices()
 
-        self.calculate(
-            star_mass=0.5,
-            star_size=0.5,
-            lens_mass=30,
-            lens_type='BH',
-            inclination=89.8,
-            semimajor_axis=0.1
-        )
+        self.calculate()
 
+    @property
+    def star_type(self):
+        if self._star_type is not None:
+            return self._star_type
+        elif not self.compact_source:
+            return 'MS'
+        else:
+            return guess_compact_type(self.star_mass)
+
+    @star_type.setter
+    def star_type(self, new_type):
+        self._star_type = self.translate_type(new_type)
+
+    @property
+    def star_size(self):
+        if self._star_size is not None:
+            return self._star_size
+        elif not self.compact_source:
+            return main_sequence_size(self.star_mass)
+        else:
+            return compact_object_size(self.star_mass)
+
+    @star_size.setter
+    def star_size(self, new_size):
+        self._star_size = new_size
+
+    @property
+    def star_flux(self):
+        if self._star_flux is not None:
+            return self._star_flux
+        elif self.star_size == 0:
+            return 0
+        else:
+            const = 2.744452656619891e+17  # boltzmann const * solar radius ** 2 * ergs
+            return 4 * np.pi * const * self.star_size ** 2 * self.star_temp ** 4  # in erg/s
+
+    @star_flux.setter
+    def star_flux(self, new_flux):
+        self._star_flux = new_flux
+
+    @property
+    def lens_type(self):
+        if self._lens_type is not None:
+            return self._lens_type
+        else:
+            return guess_compact_type(self.lens_mass)
+
+    @lens_type.setter
+    def lens_type(self, new_type):
+        self._lens_type = self.translate_type(new_type)
+
+    @property
+    def lens_size(self):
+        if self._lens_size is not None:
+            return self._lens_size
+        else:
+            return compact_object_size(self.lens_mass)
+
+    @lens_size.setter
+    def lens_size(self, new_size):
+        self._lens_size = new_size
+
+    @property
+    def lens_flux(self):
+        if self._lens_flux is not None:
+            return self._lens_flux
+        elif self.lens_size == 0:
+            return 0
+        else:
+            const = 2.744452656619891e+17  # boltzmann const * solar radius ** 2 * ergs
+            return 4 * np.pi * const * self.lens_size ** 2 * self.lens_temp ** 4  # in erg/s
+
+    @lens_flux.setter
+    def lens_flux(self, new_flux):
+        self._lens_flux = new_flux
 
     @property
     def time_units(self):
@@ -130,44 +197,12 @@ class Simulator:
 
         return t
 
-    def guess_object_properties(self, type, mass, temp=None, size=None, flux=None):
-        type = self.translate_type(type)
-        if temp is None:
-            if type == 'MS':
-                temp = 5000
-            if type == 'WD':
-                temp = 10000
-            if type == 'NS':
-                temp = 20000
-            if type == 'BH':
-                temp = 0
-
-        if size is None:
-            if type == 'MS':
-                size = 1
-            if type == 'WD':
-                # Equation 5 of https://ui.adsabs.harvard.edu/abs/2002A%26A...394..489B/abstract
-                mass_chand = mass / 1.454
-                size = 0.01125 * np.sqrt(mass_chand ** (-2/3) - mass_chand ** (2/3))
-            if type == 'NS':
-                size = 0
-            if type == 'BH':
-                size = 0
-
-        if flux is None:
-            const = 2.744452656619891e+17  # boltzmann const * solar radius ** 2 * ergs
-            flux = 4 * np.pi * const * size ** 2 * temp ** 4  # in erg/s
-
-        # print(f'mass= {mass} | type= {type} | size= {size} | temp= {temp} | flux= {flux}')
-
-        return temp, size, flux
-
     def input(self, **kwargs):
 
         for key, val in kwargs.items():
-            if hasattr(self, key) and re.match('(star|lens)_.*', key) or key == 'inclination' or key == 'semimajor_axis' or key == 'time_units':
+            if hasattr(self, key) and re.match('(star|lens)_.*', key) \
+                    or key in ('inclination', 'semimajor_axis', 'time_units', 'compact_source'):
                 setattr(self, key, val)
-                # print(f'key= {key}, val= {val}')
             else:
                 raise ValueError(f'Unkown input argument "{key}"')
 
@@ -177,22 +212,7 @@ class Simulator:
         if self.lens_mass is None:
             raise ValueError('Must provide a mass for the lensing object.')
 
-        if self.star_type is None:
-            self.star_type = self._default_star_type
-        if self.lens_type is None:
-            self.lens_type = self._default_lens_type
-
-        if self.semimajor_axis is None:
-            self.semimajor_axis = self._default_semimajor_axis
-
-        if self.inclination is None:
-            self.inclination = self._default_inclination
-
-        (self.star_temp, self.star_size, self.star_flux) = self.guess_object_properties(self.star_type, self.star_mass, self.star_temp, self.star_size, self.star_flux)
-        (self.lens_temp, self.lens_size, self.lens_flux) = self.guess_object_properties(self.lens_type, self.lens_mass, self.lens_temp, self.lens_size, self.lens_flux)
-
-        # constants = 6.67408e-11 * 1.989e30 * 1.496e11 / 299792458 ** 2
-        constants = 220961382691907.84
+        constants = 220961382691907.84  # = G*M_sun*AU/c^2 = 6.67408e-11 * 1.989e30 * 1.496e11 / 299792458 ** 2
         self.einstein_radius = np.sqrt(4 * constants * self.lens_mass * self.semimajor_axis)
         self.einstein_radius /= 6.957e8  # translate from meters to solar radii
         if self.inclination == 90:
@@ -278,10 +298,7 @@ class Simulator:
         else:
             time_units = None
 
-        if kwargs:
-            self.input(**kwargs)
-        else:
-            self.input()
+        self.input(**kwargs)
 
         if timestamps is not None or time_units is not None:
             self.ingest_timestamps(timestamps, time_units)
@@ -358,10 +375,11 @@ class Simulator:
             self.uitype = uitype  # can be "info", "toggle", "text", "number", "slider", "push", etc
             self.axes = axes  # the axes the ui-object is drawn on
             self.parameter = parameter
+            self.func = None  # assign the function to call when using a push button
             self.label = label if label is not None else parameter.replace('_', ' ') + '='
             self.use_log = False  # plot the sliders using a logarithmic scale
 
-            if uitype in ('toggle', 'text', 'number', 'slider'):
+            if uitype in ('toggle', 'text', 'number', 'slider', 'radio'):
                 bbox = axes.get_position()
                 dx = dx if dx is not None else 0.5
                 bbox.x0 += dx * bbox.width
@@ -384,7 +402,6 @@ class Simulator:
                     self.gui.toggle_activation(self.parameter, self.button)
 
                 self.button.on_clicked(callback_toggle)
-
             elif uitype in ('text', 'number'):
                 self.button = TextBox(self.axes, self.label, initial=str(value))
                 if uitype == 'text':
@@ -414,16 +431,34 @@ class Simulator:
                     self.gui.input_activation(self.parameter, self.button, new_value)
 
                 self.button.on_changed(callback_input)
+            elif uitype == 'radio':
+                self.button = RadioButtons(axes, altdata)
+                self.axes.text(0, 0.5, self.label, ha='right', va='center', transform=self.axes.transAxes)
 
+                def callback_radio(label):
+                    self.gui.input_activation(self.parameter, self.button, label)
+
+                self.button.on_clicked(callback_radio)
             elif uitype == 'push':
-                b = Button(axes, label)
-                # TODO: need to finish this
+                self.button = Button(axes, label)
+                # try to find this function in the GUI owner, if not, on the GUI itself
+                if hasattr(self.gui.owner, parameter) and callable(getattr(self.gui.owner, parameter)):
+                    self.func = getattr(self.gui.owner, parameter)
+                elif hasattr(self.gui, parameter) and callable(getattr(self.gui, parameter)):
+                    self.func = getattr(self.gui, parameter)
+                else:
+                    raise KeyError(f'Cannot find a function named "{parameter}" on the GUI or owner.')
 
+                def callback_push(event):
+                    self.func()
+                self.button.on_clicked(callback_push)
+            elif uitype == 'custom':
+                self.button = Button(axes, label)
             else:
                 raise KeyError(f'Unknown uitype ("{uitype}"). Try "push" or "toggle" or "input"')
 
         def update(self):
-            value = self.gui.pars[self.parameter]
+            value = self.gui.pars.get(self.parameter)
             if self.uitype == 'toggle':
                 self.button.label.set_text(str(value))
             elif self.uitype == 'text':
@@ -437,29 +472,30 @@ class Simulator:
                     self.button.valtext.set_text(str(round(10 ** value, 2)))
                 else:
                     self.button.set_val(value)
-
+            elif self.uitype == 'push':
+                self.button.label.set_text(self.parameter+'()')
 
     class GUI:
         def __init__(self, owner):
             self.owner = owner
             self.pars = {}  # parameters to be passed to owner
             self.buttons = []  # a list of GraphicButton objects for all input/info/action buttons
-            # self.buttons = {}  # dictionary of name: GUI object (e.g., buttons, sliders, text boxes)
-            # self.button_axes = {}  # dictionary of name: object axes (the axes containing buttons, etc)
-            # self.axes_button = {}  # reverse dictionary of above: keys are axes and values are parameter names
             self.fig = None  # figure object
             self.gs = None  # gridspec object
             self.subfigs = None  # separate panels help build this up in a modular way
             self.plot_fig = None  # a specific subfigure for display of plots
             self.left_side_fig = None  # a shortcut to the left-side subfigure
-            self.auto_update = True  # if true, will also update the owner on every change
+            self.auto_update = False  # if true, will also update the owner on every change
+            self.distance_pc = 10  # at what distance to show the magnitudes
+            self.detection_limit = 0.01  # equivalent to photometric precision
+            self.filter_list = ['R', 'V', 'B']  # which filters should we use to show the apparent magnitude
+
             self.update_pars()
-            # these are specific for this type of GUI
 
             # start building the subfigures and buttons
             self.fig = plt.figure(num='Self lensing GUI', figsize=(15, 10), clear=True)
             self.fig.canvas.mpl_disconnect(self.fig.canvas.manager.key_press_handler_id)
-            self.gs = self.fig.add_gridspec(ncols=3, nrows=3, width_ratios=[2, 8, 2], height_ratios=[3, 10, 1])
+            self.gs = self.fig.add_gridspec(ncols=3, nrows=3, width_ratios=[2, 8, 2], height_ratios=[2, 10, 1])
             self.subfigs = []
 
             # the plotting area
@@ -471,13 +507,52 @@ class Simulator:
             self.subfigs.append(self.fig.add_subfigure(self.gs[:, 0], facecolor='0.75'))
             self.left_side_fig = self.subfigs[-1]
 
-            axes_left = self.subfigs[-1].subplots(12, 1)
-            ind = 0
-            self.add_button(axes_left[ind], 'toggle', 'auto_update'); ind += 1
+            axes_left = self.subfigs[-1].subplots(13, 1); ind = 0
             self.add_button(axes_left[ind], 'number', 'inclination'); ind += 1
             self.add_button(axes_left[ind], 'slider', 'inclination', '', 0, (89.0, 90.0)); ind += 1
             self.add_button(axes_left[ind], 'number', 'semimajor_axis'); ind += 1
             self.add_button(axes_left[ind], 'slider', 'semimajor_axis', '', 0, (0.01, 10, True)); ind += 1
+            self.add_button(axes_left[ind], 'toggle', 'compact_source'); ind += 1
+
+            self.add_button(axes_left[ind], 'number', 'star_mass'); ind += 1
+            self.add_button(axes_left[ind], 'slider', 'star_mass', '', 0, (0.1, 100, True)); ind += 1
+            self.add_button(axes_left[ind], 'number', 'star_temp'); ind += 1
+            self.add_button(axes_left[ind], 'slider', 'star_temp', '', 0, (2500, 15000)); ind += 1
+
+            self.add_button(axes_left[ind], 'number', 'lens_mass'); ind += 1
+            self.add_button(axes_left[ind], 'slider', 'lens_mass', '', 0, (0.1, 100, True)); ind += 1
+            self.add_button(axes_left[ind], 'number', 'lens_temp'); ind += 1
+            self.add_button(axes_left[ind], 'slider', 'lens_temp', '', 0, (2500, 15000)); ind += 1
+
+            # right side:
+            self.subfigs.append(self.fig.add_subfigure(self.gs[:, 2], facecolor='0.75'))
+            self.right_side_fig = self.subfigs[-1]
+
+            axes_right = self.subfigs[-1].subplots(6, 1, gridspec_kw={'hspace': 1.2}); ind = 0
+            self.add_button(axes_right[ind], 'number', 'distance_pc'); ind += 1
+            self.add_button(axes_right[ind], 'slider', 'distance_pc', '', 0, (10, 10000, True)); ind += 1
+            self.add_button(axes_right[ind], 'number', 'detection_limit'); ind += 1
+            self.add_button(axes_right[ind], 'slider', 'detection_limit', '', 0, (1e-4, 10, True)); ind += 1
+            self.add_button(axes_right[ind], 'text', 'filter_list'); ind += 1
+            self.add_button(axes_right[ind], 'radio', 'time_units', None, None, ('seconds', 'minutes', 'hours')); ind += 1
+
+            # top panel:
+            self.subfigs.append(self.fig.add_subfigure(self.gs[0, 1], facecolor='0.75'))
+            self.top_fig = self.subfigs[-1]
+            # axes_top = self.subfigs[-1].subplots(2, 3)
+
+            # bottom panel:
+            self.subfigs.append(self.fig.add_subfigure(self.gs[2, 1], facecolor='0.75'))
+            self.bottom_fig = self.subfigs[-1]
+
+            axes_bottom = self.subfigs[-1].subplots(1, 2, gridspec_kw={'width_ratios': (1, 4)})
+            self.add_button(axes_bottom[0], 'toggle', 'auto_update')
+            self.add_button(axes_bottom[1], 'custom', 'calculate', 'calculate()')
+
+            def callback_calculate(event):
+                self.update(full_update=True)
+
+            self.buttons[-1].button.on_clicked(callback_calculate)
 
             # make sure all buttons and display are up to date
             self.update_pars()
@@ -486,6 +561,13 @@ class Simulator:
 
         def add_button(self, axes, uitype, parameter, label=None, dx=None, altdata=None):
             self.buttons.append(Simulator.GraphicButton(self, axes, uitype, parameter, label, dx, altdata))
+            if uitype not in ('push', 'custom'):
+                if hasattr(self.owner, parameter):
+                    self.pars[parameter] = getattr(self.owner, parameter)
+                elif hasattr(self, parameter):
+                    self.pars[parameter] = getattr(self, parameter)
+                else:
+                    raise KeyError(f'Parameter "{parameter}" does not exist in GUI or owner.')
 
         def toggle_activation(self, parameter, button):
             self.pars[parameter] = not self.pars[parameter]
@@ -497,34 +579,44 @@ class Simulator:
                 self.pars[parameter] = value
                 self.update()
 
-        def update(self):
+        def update(self, full_update=None):
+            if full_update is None:
+                full_update = self.pars['auto_update']
+
             self.left_side_fig.suptitle('Working...', fontsize='x-large')
             self.left_side_fig.canvas.draw()
             self.auto_update = self.pars['auto_update']
-            if self.auto_update:
+
+            if full_update:
                 # t0 = timer()
                 self.update_owner()
                 # print(f'time to update owner= {timer() - t0:.1f}s')
+
                 # t0 = timer()
                 self.update_pars()
                 # print(f'time to update pars= {timer() - t0:.1f}s')
+
                 # t0 = timer()
                 self.update_display()
                 # print(f'time to update display= {timer() - t0:.1f}s')
+
             # t0 = timer()
             self.update_buttons()
             # print(f'time to update buttons= {timer() - t0:.1f}s')
 
-            self.left_side_fig.suptitle('', fontsize='x-large')
+            self.left_side_fig.suptitle(f'runtime: {self.owner.latest_runtime:.4f}s', fontsize='x-large')
 
         def update_owner(self):  # apply the values in pars to the owner and run code to reflect that
             for k, v in self.pars.items():
                 if hasattr(self.owner, k):
                     setattr(self.owner, k, v)
+
             self.owner.calculate()
 
         def update_pars(self):  # get updated pars from the owner, after its code was run
-            self.pars = vars(self.owner)
+
+            for k, v in vars(self.owner).items():
+                self.pars[k] = v
 
             # add GUI parameters here on top of owner parameters
             self.pars['auto_update'] = self.auto_update
@@ -532,11 +624,27 @@ class Simulator:
         def update_display(self):  # update the display from the owner's plotting tools
             axes = self.plot_fig.axes
             [self.plot_fig.delaxes(ax) for ax in axes]
-            self.owner.syst.plot(fig=self.plot_fig)
+
+            par_list = ['distance_pc', 'detection_limit', 'filter_list', 'auto_update']
+            for p in par_list:
+                if p in self.pars:
+                    setattr(self, p, self.pars[p])
+
+            self.owner.syst.plot(
+                distance_pc=self.distance_pc,
+                detection_limit=self.detection_limit,
+                filter_list=self.filter_list,
+                fig=self.plot_fig,
+            )
 
         def update_buttons(self):  # make sure the buttons all show what is saved in pars
             for b in self.buttons:
                 b.update()
+
+            # make the temperature sliders color match the star temperature
+            for b in self.buttons:
+                if isinstance(b.button, matplotlib.widgets.Slider) and "_temp" in b.parameter:
+                    b.button.poly.set_color(get_star_plot_color(b.button.val))
 
 
 class System:
@@ -555,7 +663,9 @@ class System:
         self.lens_size = None  # in Solar radius units
         self.lens_flux = None  # bolometric flux in units of erg/s
         self.einstein_radius = None  # in Solar radius units
-
+        self.source_size = None  # in units of Einstein radii
+        self.occulter_size = None  # in units of Einstein radii
+        self.impact_parameter = None  # in units of Einstein radii
         self.timestamps = None  # for the lightcurve (units are given below, defaults to seconds)
         self._time_units = 'seconds'  # for the above-mentioned timestamps
         self.magnifications = None  # the measured lightcurve
@@ -664,7 +774,7 @@ class System:
 
         return abs_mag + 5 * np.log10(distance_pc / 10)
 
-    def plot(self, detection_limit=0.01, distance_pc=10, fig=None, font_size=16):
+    def plot(self, detection_limit=0.01, distance_pc=10, filter_list=['R', 'V', 'B'], fig=None, font_size=16):
 
         if fig is None:
             fig, ax = plt.subplots(1, 2)
@@ -696,18 +806,27 @@ class System:
         period = self.orbital_period * 3600 / translate_time_units(self.time_units)
         legend_labels.append(f'Period= {period:.1f} {self.time_units}')
 
+        # explicitely show the duty cycle
+        if np.any(idx):
+            legend_handles.append(Line2D([0], [0], lw=0))
+            legend_labels.append(f'Duty cycle= {width / period:.2e}')
+
         # add the magnitudes at distance_pc
-        R = default_filter('R')
-        V = default_filter('V')
-        B = default_filter('B')
+        if isinstance(filter_list, str):
+            filter_list = filter_list.replace('[', '').replace(']', '').replace("'", '').strip().split(',')
 
         base_mag = self.bolometric_mag(distance_pc)
-        mag_R = base_mag + self.bolometric_correction(*R)[0]
-        mag_V = base_mag + self.bolometric_correction(*V)[0]
-        mag_B = base_mag + self.bolometric_correction(*B)[0]
-        legend_handles.append(Line2D([0], [0], lw=0))
+        mag_str = f'Mag (at {int(distance_pc):d}pc):'
+        for i, filt in enumerate(filter_list):
+            filter_pars = default_filter(filt.strip())
+            magnitude = base_mag + self.bolometric_correction(*filter_pars)[0]
+            if i % 3 == 0:
+                mag_str += '\n'
+            mag_str += f' {filt}~{magnitude:.2f},'
 
-        legend_labels.append(f'Mag (at {int(distance_pc):d}pc):\n R~{mag_R:4.2f}\n V~{mag_V:4.2f}\n B~{mag_B:4.2f} ')
+        # add results to legend
+        legend_labels.append(mag_str)
+        legend_handles.append(Line2D([0], [0], lw=0))
 
         ax[0].legend(legend_handles, legend_labels, bbox_to_anchor=(1.00, 0.95), loc="upper right")
 
@@ -722,7 +841,9 @@ class System:
 
         # add the star / source
         solar_radii = '$R_\u2609$'
-        star_label = f'source size= {self.star_size:4.3f}{solar_radii}'
+        solar_mass = '$M_\u2609$'
+        star_label = f'{self.star_type} source: {self.star_mass:.2f}{solar_mass}, ' \
+                     f'{self.star_size:.3f}{solar_radii}, {self.source_size:.2f}$R_E$'
         star = plt.Circle((-2, 0), self.star_size / scale, color=get_star_plot_color(self.star_temp), label=star_label)
         ax[1].set_xlim((-3.2, 3.2))
         ax[1].set_ylim((-1.5, 1.5))
@@ -730,7 +851,8 @@ class System:
         ax[1].add_patch(star)
 
         # add the lensing object
-        lens_label = f'occulter size= {self.lens_size:4.3f}{solar_radii}'
+        lens_label = f'{self.lens_type} occulter: {self.lens_mass:.2f}{solar_mass}, ' \
+                     f'{self.lens_size:.3f}{solar_radii}, {self.occulter_size:.2f}$R_E$'
         lt = self.lens_type.strip().upper()
 
         if lt == 'WD':
@@ -752,13 +874,21 @@ class System:
         phi = np.linspace(0, 2*np.pi, 1000)
         x = 2*np.cos(phi)
         y = 2*np.sin(phi) * np.sin(np.pi / 180 * (90 - self.inclination) * 50)
-        ax[1].plot(x, y, '--k', label=f'a= {self.semimajor_axis}AU, i={self.inclination}$^\circ$')
+        ax[1].plot(x, y, '--k', label=f'a= {self.semimajor_axis:.2f}AU, '
+                                      f'i={self.inclination:.2f}$^\circ$, '
+                                      f'b={self.impact_parameter:.2f}$R_E$')
 
         legend_handles, legend_labels = ax[1].get_legend_handles_labels()
-        # replace the legend marker for the WD star
-        legend_handles[1] = Line2D([0], [0], lw=0, marker='o', color=get_star_plot_color(self.lens_temp))
-        legend_handles[2] = Line2D([0], [0], marker='o', lw=0, color=get_star_plot_color(self.star_temp))
-        legend_handles[3] = Line2D([0], [0], linestyle=':', color='r')
+
+        # replace the legend markers
+        legend_handles[1] = Line2D([0], [0], lw=0, marker='o', color=get_star_plot_color(self.star_temp))  # star
+
+        if lt == 'BH':
+            legend_handles[2] = Line2D([0], [0], lw=0, marker='o', color='black')  # lens
+        else:
+            legend_handles[2] = Line2D([0], [0], lw=0, marker='o', color=get_star_plot_color(self.lens_temp))  # lens
+
+        legend_handles[3] = Line2D([0], [0], linestyle=':', color='r')  # einstein ring
 
         # order = [2, 0, 3, 1]
         # legend_handles = [legend_handles[i] for i in order]
@@ -823,45 +953,48 @@ def default_filter(filter_name):
 
     return filters[filter_name.upper()]
 
+
+def guess_compact_type(mass):
+    if mass is None:
+        return None
+    elif mass <= 1.454:
+        return 'WD'
+    elif mass <= 2.8:
+        return 'NS'
+    else:
+        return 'BH'
+
+
+def main_sequence_size(mass):
+    """
+    reference: https://ui.adsabs.harvard.edu/abs/1991Ap%26SS.181..313D/abstract (page 8, empirical data)
+    """
+    if mass is None:
+        return None
+    elif mass <= 1.66:
+        return 1.06 * mass ** 0.945
+    else:
+        return 1.33 * mass ** 0.555
+
+
+def compact_object_size(mass):
+    """
+    reference: https://ui.adsabs.harvard.edu/abs/2002A%26A...394..489B/abstract (Equation 5)
+    """
+    if mass is None:
+        return None
+    elif mass < 1.545:
+        mass_chand = mass / 1.454
+        return 0.01125 * np.sqrt(mass_chand ** (-2 / 3) - mass_chand ** (2 / 3))
+    else:
+        return 0  # we can use Schwartschild radius for BH but what about NS?
+
+
 if __name__ == "__main__":
 
     s = Simulator()
     s.make_gui()
     # s.calculate(star_mass=0.5, star_size=0.5, lens_mass=30, lens_type='BH ', inclination=89.8, semimajor_axis=0.1)
-    # syst = s.output_system()
-    # syst.plot()
 
-    # d = s.position_radii[::2]
-    # mag1 = transfer_matrix.radial_lightcurve(
-    #     source_radius=s.source_size,
-    #     occulter_radius=s.occulter_size,
-    #     distances=d,
-    #     pixels=1e4,
-    # )
-    # mag2 = transfer_matrix.radial_lightcurve(
-    #     source_radius=s.source_size,
-    #     occulter_radius=s.occulter_size,
-    #     distances=d,
-    #     pixels=1e5,
-    # )
-    # mag3 = transfer_matrix.radial_lightcurve(
-    #     source_radius=s.source_size,
-    #     occulter_radius=s.occulter_size,
-    #     distances=d,
-    #     pixels=1e7,
-    #     circle_points=1e7,
-    # )
-    #
-    # mag_ps = transfer_matrix.point_source_approximation(d)
-    #
-    # plt.plot(s.position_radii, s.magnifications, '-*', label='matrix')
-    # plt.plot(d, mag1, '-+', label='pixels= 1e4')
-    # plt.plot(d, mag2, '-x', label='pixels= 1e6')
-    # plt.plot(d, mag3, '-o', label='pixels= 1e8')
-    # plt.plot(d, mag_ps, '-', label='point source')
-    # plt.xlabel(f'time [{s.time_units}]')
-    # plt.ylabel('magnification')
-    # plt.legend()
-    # plt.show()
 
 

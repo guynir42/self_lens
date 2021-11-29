@@ -11,9 +11,11 @@ import transfer_matrix
 
 @pytest.fixture
 def matrix():
-    T = transfer_matrix.TransferMatrix()
-    T.load('matrix.npz')
-    return T
+    return transfer_matrix.TransferMatrix.from_file('matrix.npz')
+
+@pytest.fixture
+def matrix_large():
+    return transfer_matrix.TransferMatrix.from_file('saved/matrix_SR1.000-5.000_D0.000-20.000.npz')
 
 
 @pytest.fixture
