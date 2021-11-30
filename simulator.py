@@ -45,7 +45,7 @@ class Simulator:
 
         # physical parameters (in Solar units)
         self.semimajor_axis = 1  # in AU
-        self.inclination = 90  # orbital inclination (degrees)
+        self.inclination = 89.95  # orbital inclination (degrees)
         self.compact_source = True  # is the source a compact object or a main sequence star?
         self.star_mass = 1  # in Solar mass units
         self.star_temp = 5000  # in Kelvin
@@ -228,25 +228,33 @@ class Simulator:
         self.source_size = self.star_size / self.einstein_radius
         self.occulter_size = self.lens_size / self.einstein_radius
 
-    def ingest_timestamps(self, timestamps=None, units=None):
+        # make sure to ingest the timestamps and units in the right order
+        if 'time_units' in kwargs:
+            self.time_units = kwargs['time_units']
 
-        if timestamps is not None:
-            self.timestamps = timestamps
-
-        if units is not None:
-            self.time_units = units
+        # now that units are established, we accept timestamps AS GIVEN (assuming they are already in those units!)
+        if 'timestamps' in kwargs:
+            self.timestamps = kwargs['timestamps']
 
         if self.timestamps is None:
-            return  # have to put in the default timestamps and call this function again
+            # time_range = 0.01 * self.orbital_period * 3600
+            time_range = 8 * self.crossing_time()  # in seconds
+            self.timestamps = np.linspace(-time_range, time_range, 201, endpoint=True)
+            self.timestamps /= translate_time_units(self.time_units)  # convert to correct units
 
         phases = (self.timestamps * translate_time_units(self.time_units)) / (self.orbital_period * 3600)
 
-        projected_radius = self.semimajor_axis * 215.032 / self.einstein_radius  # AU to solar radii to Einstein radius
+        projected_radius = self.semimajor_axis * 215.032 / self.einstein_radius  # AU to solar radii to Einstein radii
         x = projected_radius * np.sin(2 * np.pi * phases)
         y = projected_radius * np.cos(2 * np.pi * phases) * np.cos(self.inclination / 180 * np.pi)
-
         self.position_radii = np.sqrt(x ** 2 + y ** 2)
         self.position_angles = np.arctan2(y, x)
+
+        # print(f'min(x)= {np.min(x)}, min(y)= {np.min(y)}, max(y)= {np.max(y)}')
+        # plt.plot(phases, x)
+        # plt.plot(phases, y)
+        # plt.plot(phases, self.position_radii)
+        # plt.legend(['x', 'y', 'r'])
 
     def choose_matrix(self, source_size=None):
 
@@ -268,7 +276,7 @@ class Simulator:
         """
         A rough estimate of the crossing time, considering
         the impact parameter and the resulting source+lens chords,
-        and the orbital velocity.
+        and the orbital velocity. The output is in seconds.
         """
 
         width = 0
@@ -279,7 +287,7 @@ class Simulator:
             width += 2 * np.sqrt(self.source_size ** 2 - self.impact_parameter ** 2)
 
         width = max(1, width)
-        width *= self.einstein_radius / 215.032 # convert from Einstein radius to Solar radius to AU
+        width *= self.einstein_radius / 215.032  # convert from Einstein radius to Solar radius to AU
 
         velocity = 2 * np.pi * self.semimajor_axis / (self.orbital_period * 3600)
 
@@ -291,23 +299,14 @@ class Simulator:
         if 'timestamps' in kwargs:
             timestamps = kwargs.pop('timestamps')
         else:
-            timestamps = None
+            timestamps = self.timestamps
 
         if 'time_units' in kwargs:
             time_units = kwargs.pop('time_units')
         else:
-            time_units = None
+            time_units = self.time_units
 
         self.input(**kwargs)
-
-        if timestamps is not None or time_units is not None:
-            self.ingest_timestamps(timestamps, time_units)
-
-        if self.timestamps is None:
-            # time_range = 0.01 * self.orbital_period * 3600
-            time_range = 8 * self.crossing_time()
-            timestamps = np.linspace(-time_range, time_range, 201, endpoint=True)
-            self.ingest_timestamps(timestamps / translate_time_units(self.time_units), self.time_units)
 
         # first check if the requested source size is lower/higher than any matrix
         max_sizes = np.array([mat.max_source for mat in self.matrices])
@@ -509,7 +508,7 @@ class Simulator:
 
             axes_left = self.subfigs[-1].subplots(13, 1); ind = 0
             self.add_button(axes_left[ind], 'number', 'inclination'); ind += 1
-            self.add_button(axes_left[ind], 'slider', 'inclination', '', 0, (89.0, 90.0)); ind += 1
+            self.add_button(axes_left[ind], 'slider', 'inclination', '', 0, (87.5, 90.0)); ind += 1
             self.add_button(axes_left[ind], 'number', 'semimajor_axis'); ind += 1
             self.add_button(axes_left[ind], 'slider', 'semimajor_axis', '', 0, (0.01, 10, True)); ind += 1
             self.add_button(axes_left[ind], 'toggle', 'compact_source'); ind += 1
@@ -994,7 +993,7 @@ if __name__ == "__main__":
 
     s = Simulator()
     s.make_gui()
-    # s.calculate(star_mass=0.5, star_size=0.5, lens_mass=30, lens_type='BH ', inclination=89.8, semimajor_axis=0.1)
+    # s.calculate(star_mass=0.5, star_size=0.5, lens_mass=30, lens_type='BH ', inclination=89.0, semimajor_axis=0.1)
 
 
 
