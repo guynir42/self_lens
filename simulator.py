@@ -45,7 +45,8 @@ class Simulator:
 
         # physical parameters (in Solar units)
         self.semimajor_axis = 1  # in AU
-        self.inclination = 89.95  # orbital inclination (degrees)
+        # self.inclination = 89.95  # orbital inclination (degrees)
+        self.declination = 0.01  # 90-inclination (degrees)
         self.compact_source = True  # is the source a compact object or a main sequence star?
         self.star_mass = 1  # in Solar mass units
         self.star_temp = 5000  # in Kelvin
@@ -77,6 +78,14 @@ class Simulator:
         self.load_matrices()
 
         self.calculate()
+
+    @property
+    def inclination(self):
+        return 90 - self.declination
+
+    @inclination.setter
+    def inclination(self, new_value):
+        self.declination = 90 - new_value
 
     @property
     def star_type(self):
@@ -215,10 +224,10 @@ class Simulator:
         constants = 220961382691907.84  # = G*M_sun*AU/c^2 = 6.67408e-11 * 1.989e30 * 1.496e11 / 299792458 ** 2
         self.einstein_radius = np.sqrt(4 * constants * self.lens_mass * self.semimajor_axis)
         self.einstein_radius /= 6.957e8  # translate from meters to solar radii
-        if self.inclination == 90:
+        if self.declination == 0:
             self.impact_parameter = 0
         else:
-            self.impact_parameter = self.semimajor_axis * np.cos(self.inclination / 180 * np.pi)
+            self.impact_parameter = self.semimajor_axis * np.sin(self.declination / 180 * np.pi)
             self.impact_parameter *= 215.032  # convert to solar radii
             self.impact_parameter /= self.einstein_radius  # convert to units of Einstein Radius
 
@@ -235,18 +244,19 @@ class Simulator:
         # now that units are established, we accept timestamps AS GIVEN (assuming they are already in those units!)
         if 'timestamps' in kwargs:
             self.timestamps = kwargs['timestamps']
-
-        if self.timestamps is None:
-            # time_range = 0.01 * self.orbital_period * 3600
+        else:
+        # if self.timestamps is None:
+            time_range = 0.01 * self.orbital_period * 3600
             time_range = 8 * self.crossing_time()  # in seconds
             self.timestamps = np.linspace(-time_range, time_range, 201, endpoint=True)
             self.timestamps /= translate_time_units(self.time_units)  # convert to correct units
+        # TODO: must store a hidden value of timestamps to tell them apart from the auto-generated timestamps
 
         phases = (self.timestamps * translate_time_units(self.time_units)) / (self.orbital_period * 3600)
 
         projected_radius = self.semimajor_axis * 215.032 / self.einstein_radius  # AU to solar radii to Einstein radii
         x = projected_radius * np.sin(2 * np.pi * phases)
-        y = projected_radius * np.cos(2 * np.pi * phases) * np.cos(self.inclination / 180 * np.pi)
+        y = projected_radius * np.cos(2 * np.pi * phases) * np.sin(self.declination / 180 * np.pi)
         self.position_radii = np.sqrt(x ** 2 + y ** 2)
         self.position_angles = np.arctan2(y, x)
 
@@ -484,7 +494,7 @@ class Simulator:
             self.subfigs = None  # separate panels help build this up in a modular way
             self.plot_fig = None  # a specific subfigure for display of plots
             self.left_side_fig = None  # a shortcut to the left-side subfigure
-            self.auto_update = False  # if true, will also update the owner on every change
+            self.auto_update = True  # if true, will also update the owner on every change
             self.distance_pc = 10  # at what distance to show the magnitudes
             self.detection_limit = 0.01  # equivalent to photometric precision
             self.filter_list = ['R', 'V', 'B']  # which filters should we use to show the apparent magnitude
@@ -507,10 +517,10 @@ class Simulator:
             self.left_side_fig = self.subfigs[-1]
 
             axes_left = self.subfigs[-1].subplots(13, 1); ind = 0
-            self.add_button(axes_left[ind], 'number', 'inclination'); ind += 1
-            self.add_button(axes_left[ind], 'slider', 'inclination', '', 0, (87.5, 90.0)); ind += 1
+            self.add_button(axes_left[ind], 'number', 'declination'); ind += 1
+            self.add_button(axes_left[ind], 'slider', 'declination', '', 0, (1e-4, 10, True)); ind += 1
             self.add_button(axes_left[ind], 'number', 'semimajor_axis'); ind += 1
-            self.add_button(axes_left[ind], 'slider', 'semimajor_axis', '', 0, (0.01, 10, True)); ind += 1
+            self.add_button(axes_left[ind], 'slider', 'semimajor_axis', '', 0, (1e-4, 10, True)); ind += 1
             self.add_button(axes_left[ind], 'toggle', 'compact_source'); ind += 1
 
             self.add_button(axes_left[ind], 'number', 'star_mass'); ind += 1
@@ -529,7 +539,7 @@ class Simulator:
 
             axes_right = self.subfigs[-1].subplots(6, 1, gridspec_kw={'hspace': 1.2}); ind = 0
             self.add_button(axes_right[ind], 'number', 'distance_pc'); ind += 1
-            self.add_button(axes_right[ind], 'slider', 'distance_pc', '', 0, (10, 10000, True)); ind += 1
+            self.add_button(axes_right[ind], 'slider', 'distance_pc', '', 0, (5, 10000, True)); ind += 1
             self.add_button(axes_right[ind], 'number', 'detection_limit'); ind += 1
             self.add_button(axes_right[ind], 'slider', 'detection_limit', '', 0, (1e-4, 10, True)); ind += 1
             self.add_button(axes_right[ind], 'text', 'filter_list'); ind += 1
