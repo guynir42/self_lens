@@ -7,7 +7,11 @@ from timeit import default_timer as timer
 
 sys.path.append(path.dirname(path.abspath(__file__)))
 import transfer_matrix
+import simulator
 
+@pytest.fixture
+def sim():
+    return simulator.Simulator()
 
 @pytest.fixture
 def matrix():

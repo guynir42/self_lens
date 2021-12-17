@@ -128,7 +128,7 @@ class Survey:
         dist = []
         mag = []
         for i, d in enumerate(self.distances):
-            new_mag = system.bolometric_mag(d) + bol_correct
+            new_mag = system.bolometric_mag(d) - bol_correct
             if new_mag > self.limmag:
                 break
             dist.append(d)

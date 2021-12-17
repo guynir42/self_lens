@@ -733,25 +733,17 @@ class System:
         if wavelength is None or bandwidth is None:
             return 0
 
-        def bb(la, temp):
-            const = 0.014387773538277204  # hc/k_b = 6.62607004e-34 * 299 792 458 / 1.38064852e-23
-            la *= 1e-9  # convert wavelength from nm to m
-            return 1 / (la ** 5 * (np.exp(const/(la * temp)) - 1))
+        filt_la1 = wavelength - bandwidth/2
+        filt_la2 = wavelength + bandwidth/2
 
-        la1 = wavelength - bandwidth/2
-        la2 = wavelength + bandwidth/2
-
-        min_la = 100
-        max_la = 1e5
-
-        bolometric1 = integ.quad(bb, min_la, max_la, self.star_temp)[0]
-        in_band1 = integ.quad(bb, la1, la2, self.star_temp)[0]
+        bolometric1 = integ.quad(black_body, *find_lambda_range(self.star_temp), self.star_temp)[0]
+        in_band1 = integ.quad(black_body, filt_la1, filt_la2, self.star_temp)[0]
         fraction1 = in_band1 / bolometric1
         # print(f'bolometric1= {bolometric1} | in_band1= {in_band1}')
 
         if self.lens_flux > 0 and self.lens_temp > 0:
-            bolometric2 = integ.quad(bb, min_la, max_la, self.lens_temp)[0]
-            in_band2 = integ.quad(bb, la1, la2, self.lens_temp)[0]
+            bolometric2 = integ.quad(black_body, *find_lambda_range(self.lens_temp), self.lens_temp)[0]
+            in_band2 = integ.quad(black_body, filt_la1, filt_la2, self.lens_temp)[0]
             fraction2 = in_band2 / bolometric2
         else:
             fraction2 = 0
@@ -762,7 +754,7 @@ class System:
         ratio = flux_band / flux_bolo
         dilution = (self.star_flux * fraction1) / (self.star_flux * fraction1 + self.lens_flux * fraction2)
 
-        return -2.5 * np.log10(ratio), dilution
+        return 2.5 * np.log10(ratio), dilution
 
     def bolometric_mag(self, distance_pc):
         """
@@ -828,7 +820,7 @@ class System:
         mag_str = f'Mag (at {int(distance_pc):d}pc):'
         for i, filt in enumerate(filter_list):
             filter_pars = default_filter(filt.strip())
-            magnitude = base_mag + self.bolometric_correction(*filter_pars)[0]
+            magnitude = base_mag - self.bolometric_correction(*filter_pars)[0]
             if i % 3 == 0:
                 mag_str += '\n'
             mag_str += f' {filt}~{magnitude:.2f},'
@@ -909,6 +901,42 @@ class System:
         return ax
 
 
+def find_lambda_range(temp):
+    """
+    Find the range of temperatures that are relevant for
+    a black body of this temperature.
+    It uses Wein's displacement law to find the peak radiation,
+    and gives *10 and /10 of that value.
+    :param temp:
+        temperature of the black body.
+    :return: 2-tuple
+        the minimal and maximal wavelength range (in nm).
+    """
+    wein_b = 2.897e6  # in units of nm/K
+    best_la = wein_b / temp
+    la1 = best_la/10
+    la2 = best_la*10
+    return la1, la2
+
+
+def black_body(la, temp):  # black body radiation
+    """
+    get the amount of radiation expected from a black body
+    of the given temperature "temp", at the given wavelengths "la".
+    :param la: float array or scalar
+        wavelength(s) where the radiation should be calculated.
+    :param temp: float scalar
+        temperature of the black body.
+    :return:
+        return the radiation (in units of Watts per steradian per m^2 per nm)
+    """
+    const = 0.014387773538277204  # h*c/k_b = 6.62607004e-34 * 299792458 / 1.38064852e-23
+    amp = 1.1910429526245744e-25  # 2*h*c**2 * (nm / m) = 2*6.62607004e-34 * 299792458**2 / 1e9 the last term is units
+    la = la * 1e-9  # convert wavelength from nm to m
+
+    return amp / (la ** 5 * (np.exp(const/(la * temp)) - 1))
+
+
 def translate_time_units(units):
     d = {'seconds': 1, 'minutes': 60, 'hours': 3600, 'days': 3600 * 24, 'years': 3600 * 24 * 365.25}
     if units not in d:
@@ -953,6 +981,7 @@ def default_filter(filter_name):
         'R': (658, 138),
         'I': (806, 149),
         'F500W': (500, 200),
+        'white': (550, 300),
     }
     # TODO: make sure these numbers are correct!
 
@@ -1002,8 +1031,9 @@ def compact_object_size(mass):
 if __name__ == "__main__":
 
     s = Simulator()
-    s.make_gui()
-    # s.calculate(star_mass=0.5, star_size=0.5, lens_mass=30, lens_type='BH ', inclination=89.0, semimajor_axis=0.1)
+    # s.make_gui()
+    s.calculate(star_mass=1.0, star_size=1.0, star_type='MS', star_temp=5778,
+                lens_mass=30, lens_type='BH ', inclination=89.0, semimajor_axis=0.1)
 
 
 
