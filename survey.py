@@ -11,6 +11,7 @@ import simulator
 
 MINIMAL_DISTANCE_PC = 10
 
+
 class Survey:
     def __init__(self, name, **kwargs):
         """
@@ -75,19 +76,6 @@ class Survey:
             if getattr(self, k) is None:
                 raise ValueError(f'Must have a valid value for "{k}".')
 
-    # def make_lightcurve(self, system):
-    #     """
-    #     Make a demonstration lightcurve, covering 100 points on either side of the event center
-    #
-    #     :param system:
-    #         A system object.
-    #     :return:
-    #         A tuple with timestamps, lightcurves (in units of mag) and errors.
-    #     """
-    #     # start by down sampling the event lightcurve:
-    #
-    #
-    #     # ts = np.arange(-100, 100, 1) * self.cadence * 24 * 3600 * simulator.translate_time_units
     def apply_detection_statistics(self, system):
         """
         Find the detection probability for the given system and this survey,
@@ -158,6 +146,7 @@ class Survey:
 
         # determine how much time the lensing event is above the survey precision
         det_lc = lc[mid_idx:]  # detection lightcurve
+
         if not np.any(det_lc > self.precision):
             return  # this light curve is below our photometric precision at all times
 
@@ -170,7 +159,13 @@ class Survey:
             else:
                 end_idx = np.argmin(det_lc > p)  # first index where lc dips below precision
 
-            flare_time_per_distance.append(2 * (ts[end_idx + mid_idx - 1] - ts[mid_idx]))
+            # flare_time_per_distance.append(2 * (ts[end_idx + mid_idx - 1] - ts[mid_idx]))
+            t1 = ts[mid_idx + end_idx - 1]
+            t2 = ts[mid_idx + end_idx]
+            l1 = det_lc[end_idx - 1]
+            l2 = det_lc[end_idx]
+            flare_time_per_distance = t1 + (p - l1) / (l2 - l1) * (t2 - t1)  # linear interpolation
+            flare_time_per_distance *= 2  # symmetric lightcurve
 
         t_flare = max(flare_time_per_distance)  # flare duration relative to survey's best precision
         t_exp = self.exposure_time
@@ -184,21 +179,21 @@ class Survey:
         # num_visits_in_survey = (self.duration * 365.25) // self.cadence
         # num_fields = (self.cadence * 24 * 3600) // t_series
         num_visits_per_year = 365.25 * 24 * 3600 * self.duty_cycle / t_series  # in all sky locations combined
-        system.volumes[self.name] = np.diff(solid_angle / 3 * dist ** 3, prepend=MINIMAL_DISTANCE_PC)  # single visit
+        system.volumes[self.name] = np.diff(solid_angle / 3 * dist ** 3, prepend=solid_angle / 3 * MINIMAL_DISTANCE_PC ** 3)  # single visit
         system.total_volumes[self.name] = system.volumes[self.name] * num_visits_per_year  # for all visits, per year
         system.flare_durations[self.name] = flare_time_per_distance
 
         # find the S/N for the best precision, then scale it for each distance
         (snr, coverage) = calc_snr_and_coverage(lc, ts, self.precision, t_flare, t_exp, t_dead, self.series_length)
 
-        period = system.orbital_period * 3600 # shorthand
+        period = system.orbital_period * 3600  # shorthand
         if period < t_exp:  # this only applies to simple S/N case of diluted signal
             pass  # TODO: figure out this case later
         # cases where the series is longer than the period are considered in "multi visit prob." below
 
         # adjust the S/N with precision at each distance and time
         snr = np.expand_dims(snr, axis=0)  # make this a 2D array
-        snr = snr * self.precision / prec  # should be 2D, with axes 0: distances, 1: timestamps
+        snr = snr * self.precision / prec  # axes 0: distances, axis 1: timestamps
 
         prob = 0.5 * (1 + scipy.special.erf(snr - self.threshold))  # assume Gaussian distribution
 
@@ -222,8 +217,28 @@ class Survey:
         # the probability to find at least one flare (cannot exceed 1)
         system.total_prob[self.name] = 1 - (1 - prob) ** num_visits_per_year
 
-        # if single visit prob. is large, can definitely accumulate more effective volume than volume
+        # if single visit prob. is large, can accumulate more effective volume than volume
         system.effective_volumes[self.name] = np.sum(system.total_volumes[self.name] * system.visit_prob[self.name])
+
+    def visit_prob_all_declinations(self, sim, num_points=1e4):
+        num_points = int(num_points)
+
+        dec = np.linspace(0, 90, num_points)
+        prob = np.zeros(dec.shape)
+
+        for i, d in enumerate(dec):
+            sim.calculate(declination=d)
+            self.apply_detection_statistics(sim.syst)
+            if sim.syst.visit_prob['ZTF']:
+                prob[i] = sim.syst.visit_prob['ZTF']
+            else:
+                break
+
+        # marginalize over all angles
+        total_prob = np.sum(np.cos(np.deg2rad(dec)) * prob) / np.sum(np.cos(np.deg2rad(dec)))
+        peak_prob = np.max(prob)
+
+        return peak_prob, total_prob
 
 
 def calc_snr_and_coverage(lc, ts, precision, t_flare, t_exp, t_dead=0, series_length=1):
@@ -334,6 +349,7 @@ def setup_default_survey(name, kwargs):
     for k, v in defaults[name].items():
         if k not in kwargs:
             kwargs[k] = v
+
 
 
 if __name__ == "__main__":

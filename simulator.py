@@ -191,6 +191,10 @@ class Simulator:
         self.matrices = sorted(self.matrices, key=lambda mat: mat.max_source)
 
     def translate_type(self, type):
+
+        if type is None:
+            return None
+
         t = type.lower().replace('_', ' ').strip()
 
         if t == 'ms' or t == 'main sequence' or t == 'star':
@@ -210,7 +214,7 @@ class Simulator:
 
         for key, val in kwargs.items():
             if hasattr(self, key) and re.match('(star|lens)_.*', key) \
-                    or key in ('inclination', 'semimajor_axis', 'time_units', 'compact_source'):
+                    or key in ('declination', 'inclination', 'semimajor_axis', 'time_units', 'compact_source'):
                 setattr(self, key, val)
             else:
                 raise ValueError(f'Unkown input argument "{key}"')
@@ -248,7 +252,7 @@ class Simulator:
         # if self.timestamps is None:
             time_range = 0.01 * self.orbital_period * 3600
             time_range = 8 * self.crossing_time()  # in seconds
-            self.timestamps = np.linspace(-time_range, time_range, 201, endpoint=True)
+            self.timestamps = np.linspace(-time_range, time_range, 2001, endpoint=True)
             self.timestamps /= translate_time_units(self.time_units)  # convert to correct units
         # TODO: must store a hidden value of timestamps to tell them apart from the auto-generated timestamps
 
@@ -372,6 +376,28 @@ class Simulator:
         # print(f'peak= {peak} | half_idx= {half_idx}')
 
         return 2 * (ts[peak_idx] - ts[half_idx])
+
+    def visit_prob_all_declinations_estimate(self):
+        """
+        Get a back-of-the-envelope estimate for the single visit probability,
+        when marginalizing over all declinations / inclinations.
+
+        """
+        einstein_km = self.einstein_radius * 700000  # convert solar radii to km
+
+        scale_km = einstein_km
+
+        # maximum length scale for lensing is lens+source size (already in einstein units)
+        scale_km *= (1 + self.source_size)
+
+        sma_km = self.semimajor_axis * 150e6  # convert AU to km
+
+        # what fraction of the sphere is covered by the einstein ring
+        angle_rad = scale_km / sma_km
+
+        total_prob_estimate = angle_rad ** 2 / 4
+
+        return total_prob_estimate
 
     def make_gui(self):
         self.gui = self.GUI(self)
@@ -1021,7 +1047,7 @@ def compact_object_size(mass):
     """
     if mass is None:
         return None
-    elif mass < 1.545:
+    elif mass < 1.454:
         mass_chand = mass / 1.454
         return 0.01125 * np.sqrt(mass_chand ** (-2 / 3) - mass_chand ** (2 / 3))
     else:
@@ -1032,8 +1058,8 @@ if __name__ == "__main__":
 
     s = Simulator()
     # s.make_gui()
-    s.calculate(star_mass=1.0, star_size=1.0, star_type='MS', star_temp=5778,
-                lens_mass=30, lens_type='BH ', inclination=89.0, semimajor_axis=0.1)
+    s.calculate(star_mass=1.0, star_size=None, star_type=None, star_temp=5778,
+                lens_mass=3.0, lens_type=None, inclination=89.0, semimajor_axis=0.1)
 
 
 
