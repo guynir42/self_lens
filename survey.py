@@ -294,7 +294,7 @@ def calc_snr_and_coverage(lc, ts, precision, t_flare, t_exp, t_dead=0, series_le
         # dt = min(t_flare, t_exp) / 10  # time step
         dt = ts[1] - ts[0]  # assume timestamps are uniformly sampled in the simulated LC
         N_exp = int(np.ceil(t_exp / dt))  # number of time steps in single exposure
-        single_exposure_snr = np.convolve(lc, np.ones(N_exp)) / N_exp / precision
+        single_exposure_snr = np.convolve(lc, np.ones(N_exp), mode='same') / N_exp / precision
 
         if series_length > 1:
             N_btw_repeats = int(np.ceil((t_exp + t_dead) / dt))  # number of steps between repeat exposures

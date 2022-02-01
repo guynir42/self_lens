@@ -35,3 +35,24 @@ def test_apparent_magnitudes(sim):
     mag = sim.syst.bolometric_mag(22)  # magnitude at 22pc
 
     assert abs(mag - 14.85) < 0.5  # from Gaia we get mag_g is 14.85
+
+
+def test_max_magnification(sim):
+    """
+    Use the examples in https://ui.adsabs.harvard.edu/abs/1997ChPhL..14..155Q/abstract (page 4)
+    to test if the peak magnification is consistent.
+    """
+
+    sim.star_size = 6400 / 700000  # source is Earth-size, in units of solar radii
+    sim.lens_mass = 1  # solar mass
+    sim.declination = 0
+    sim.lens_size = 0
+    sim.semimajor_axis = 700000 / 150e6  # distance is Solar radius (in units of AU)
+    sim.calculate()
+
+    assert np.abs(np.max(sim.magnifications) - 1.2) < 0.02
+
+    sim.semimajor_axis = 1  # one AU
+    sim.calculate()
+
+    assert np.abs(np.max(sim.magnifications) - 9.4) < 0.02

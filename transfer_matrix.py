@@ -1374,6 +1374,17 @@ def point_source_approximation(distances):
     return 0.5 * (sq + 1 / sq)
 
 
+def distance_for_precision(precision):
+    """Inverse the point source approximation to find the distance at which magnification
+       reaches the precision given.
+       The precision is the magnification - 1 that is required.
+       E.g., precision 0.02 (or 2%) means magnification should be 1.02.
+    """
+
+    t = 2 * precision + precision ** 2
+    return np.sqrt(2 / (t + np.sqrt(t)))
+
+
 def large_source_approximation(distances, source_radius, occulter_radius=0, edge_correction=True):
     """
 

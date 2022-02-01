@@ -377,7 +377,7 @@ class Simulator:
 
         return 2 * (ts[peak_idx] - ts[half_idx])
 
-    def visit_prob_all_declinations_estimate(self):
+    def visit_prob_all_declinations_estimate(self, precision=0.01, threshold=3):
         """
         Get a back-of-the-envelope estimate for the single visit probability,
         when marginalizing over all declinations / inclinations.
@@ -388,7 +388,10 @@ class Simulator:
         scale_km = einstein_km
 
         # maximum length scale for lensing is lens+source size (already in einstein units)
-        scale_km *= (1 + self.source_size)
+        multiplier_star = (1 + self.source_size)
+        multiplier_prec = transfer_matrix.distance_for_precision(precision * threshold)
+        # print(f'star= {multiplier_star:.3f} | prec= {multiplier_prec:.3f}')
+        scale_km *= max(multiplier_star, multiplier_prec)
 
         sma_km = self.semimajor_axis * 150e6  # convert AU to km
 
@@ -502,7 +505,10 @@ class Simulator:
                 self.button.text_disp.set_text(str(round(value, 4)))
             elif self.uitype == 'slider':
                 if self.use_log:
-                    value = np.log10(value)
+                    if value <= 0:
+                        value = 0
+                    else:
+                        value = np.log10(value)
                     self.button.set_val(value)
                     self.button.valtext.set_text(str(round(10 ** value, 2)))
                 else:
