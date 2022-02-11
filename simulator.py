@@ -10,6 +10,7 @@ from matplotlib.widgets import Button, TextBox, Slider, RadioButtons
 from timeit import default_timer as timer
 import scipy.integrate as integ
 
+import survey
 import transfer_matrix
 
 # TODO: add automatic white dwarf radius from https://github.com/mahollands/MR_relation
@@ -40,6 +41,7 @@ class Simulator:
         self.einstein_radius = None  # in Solar units, to translate the input
         self.impact_parameter = None
         self.orbital_period = None  # in units of hours
+        self.roche_lobe = None  # in units of solar radii
         self.source_size = None
         self.occulter_size = None
 
@@ -238,6 +240,11 @@ class Simulator:
         self.orbital_period = self.semimajor_axis ** (3 / 2) / np.sqrt(self.star_mass + self.lens_mass)
         self.orbital_period *= 365.25 * 24  # convert from years to hours
 
+        # ref: https://ui.adsabs.harvard.edu/abs/1983ApJ...268..368E/abstract
+        q = self.star_mass / self.lens_mass
+        self.roche_lobe = (0.49 * q ** (2 / 3)) / (0.6 * q ** (2 / 3) + np.log(1 + q ** (1 / 3)))
+        self.roche_lobe *= self.semimajor_axis * 215.032  # convert AU to Solar radii
+
         self.source_size = self.star_size / self.einstein_radius
         self.occulter_size = self.lens_size / self.einstein_radius
 
@@ -377,11 +384,11 @@ class Simulator:
 
         return 2 * (ts[peak_idx] - ts[half_idx])
 
-    def visit_prob_all_declinations_estimate(self, precision=0.01, threshold=3):
+    def length_scale_estimate(self, precision=0.01, threshold=3):
         """
-        Get a back-of-the-envelope estimate for the single visit probability,
-        when marginalizing over all declinations / inclinations.
-
+        Find the length scale (in km) away from perfect alignment where
+        a lens can be relative to the source and still have magnification
+        brighter than precision times threshold.
         """
         einstein_km = self.einstein_radius * 700000  # convert solar radii to km
 
@@ -392,6 +399,28 @@ class Simulator:
         multiplier_prec = transfer_matrix.distance_for_precision(precision * threshold)
         # print(f'star= {multiplier_star:.3f} | prec= {multiplier_prec:.3f}')
         scale_km *= max(multiplier_star, multiplier_prec)
+
+        return scale_km
+
+    def best_prob_all_declinations_estimate(self, precision=0.01, threshold=3):
+        """
+        The probability of this system to be detectable, assuming best
+        possible timing (or continuous coverage).
+        Does not consider the effects of lens occultation.
+        """
+
+        scale_km = self.length_scale_estimate(precision, threshold)
+        quarter_circle_km = self.semimajor_axis * 150e6 / 2 * np.pi  # convert AU to km
+
+        return np.sin(scale_km / quarter_circle_km)  # sin weighting of low declination more than high
+
+    def visit_prob_all_declinations_estimate(self, precision=0.01, threshold=3):
+        """
+        Get a back-of-the-envelope estimate for the single visit probability,
+        when marginalizing over all declinations / inclinations.
+
+        """
+        scale_km =self. length_scale_estimate(precision, threshold)
 
         sma_km = self.semimajor_axis * 150e6  # convert AU to km
 
@@ -692,6 +721,7 @@ class System:
     def __init__(self):
         self.semimajor_axis = None  # in AU
         self.orbital_period = None  # in units of hours
+        self.roche_lobe = None  # in units of solar radii
         self.inclination = None  # orbital inclination (degrees)
         self.star_mass = None  # in Solar mass units
         self.star_type = None  # what kind of object: "star", "WD", "NS", "BH"
@@ -718,9 +748,11 @@ class System:
         self.distances = {}  # parsec
         self.volumes = {}  # parsec^3
         self.apparent_mags = {}  # in the specific band
-        self.visit_prob = {}  # probability (0 to 1) of detection in one visit
+        self.flare_prob = {}  # probability to detect flare at peak (i.e., best timing)
+        self.visit_prob = {}  # probability of detection in one visit (including duty cycle)
         self.total_prob = {}  # probability after multiple visit in the duration of the survey
         self.total_volumes = {}  # volumes observed over the duration of the survey
+        self.num_detections = {}  # how many detections per visit (on average)
         self.footprints = {}  # the angular area (in square degrees) over the duration of the survey
         self.flare_durations = {}  # duration above detection limit (sec)
         self.dilutions = {}  # how much is the lens light diluting the flare in each survey
@@ -806,6 +838,9 @@ class System:
         abs_mag = -2.5 * np.log10(flux) + 71.197425 + 17.5  # the 17.5 is to convert W->erg/s
 
         return abs_mag + 5 * np.log10(distance_pc / 10)
+
+    def is_detached(self):
+        return self.roche_lobe > self.star_size
 
     def plot(self, detection_limit=0.01, distance_pc=10, filter_list=['R', 'V', 'B'], fig=None, font_size=16):
 
@@ -907,21 +942,22 @@ class System:
         phi = np.linspace(0, 2*np.pi, 1000)
         x = 2*np.cos(phi)
         y = 2*np.sin(phi) * np.sin(np.pi / 180 * (90 - self.inclination) * 50)
-        ax[1].plot(x, y, '--k', label=f'a= {self.semimajor_axis:.2f}AU, '
+        fmt = f'.{int(np.ceil(-np.log10(self.semimajor_axis)))}f'
+        ax[1].plot(x, y, '--k', label=f'a= {self.semimajor_axis:{fmt}}AU, '
                                       f'i={self.inclination:.2f}$^\circ$, '
                                       f'b={self.impact_parameter:.2f}$R_E$')
 
         legend_handles, legend_labels = ax[1].get_legend_handles_labels()
 
         # replace the legend markers
-        legend_handles[1] = Line2D([0], [0], lw=0, marker='o', color=get_star_plot_color(self.star_temp))  # star
+        legend_handles[0] = Line2D([0], [0], lw=0, marker='o', color=get_star_plot_color(self.star_temp))  # star
 
         if lt == 'BH':
-            legend_handles[2] = Line2D([0], [0], lw=0, marker='o', color='black')  # lens
+            legend_handles[1] = Line2D([0], [0], lw=0, marker='o', color='black')  # lens
         else:
-            legend_handles[2] = Line2D([0], [0], lw=0, marker='o', color=get_star_plot_color(self.lens_temp))  # lens
+            legend_handles[1] = Line2D([0], [0], lw=0, marker='o', color=get_star_plot_color(self.lens_temp))  # lens
 
-        legend_handles[3] = Line2D([0], [0], linestyle=':', color='r')  # einstein ring
+        legend_handles[2] = Line2D([0], [0], linestyle=':', color='r')  # einstein ring
 
         # order = [2, 0, 3, 1]
         # legend_handles = [legend_handles[i] for i in order]

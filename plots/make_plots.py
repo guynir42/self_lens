@@ -5,6 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import transfer_matrix
+import simulator
+import survey
 
 """
 This script should be used to produce all the plots needed for the paper.  
@@ -31,3 +33,130 @@ transfer_matrix.single_geometry(source_radius=0.8, distance=0.4, occulter_radius
 
 plt.sca(ax3)
 transfer_matrix.single_geometry(source_radius=0.8, distance=1.6, occulter_radius=0, plotting=True, legend=True)
+
+
+## setup a simulator
+import simulator
+sim = simulator.Simulator()
+
+## peak magnification vs. orbital period
+
+plt.rc('font', size=16)
+sim.star_mass = 0.6
+sim.star_temp = 7000
+sim.declination = 0
+
+fig = plt.figure(num=2, figsize=[15, 10])
+plt.clf()
+ax = fig.add_axes([0.08, 0.08, 0.87, 0.87])
+
+thresholds = [0.01, 0.2, np.inf]
+prop_cycle = plt.rcParams['axes.prop_cycle']
+colors = prop_cycle.by_key()['color']
+
+# for WD lenses
+masses = np.array([0.3, 0.6, 1.0, 1.35])
+styles = ['*', 'v', 's', 'p']
+orbits = np.geomspace(0.0001, 1, 60)
+peak_mags = np.zeros((len(masses), len(orbits)))
+periods = np.zeros(peak_mags.shape)
+prob_low = np.zeros(peak_mags.shape)
+prob_high = np.zeros(peak_mags.shape)
+roche = np.zeros(peak_mags.shape)
+
+for i, m in enumerate(masses):
+    t = 0
+    sim.lens_mass = m
+    for j, a in enumerate(orbits):
+        sim.semimajor_axis = a
+        mag = sim.calculate()
+        periods[i, j] = sim.orbital_period * 3600
+        peak_mags[i, j] = np.max(mag - 1)
+        prob_low[i, j] = sim.best_prob_all_declinations_estimate(precision=thresholds[0], threshold=1)
+        prob_high[i, j] = sim.best_prob_all_declinations_estimate(precision=thresholds[1], threshold=1)
+        roche[i, j] = sim.roche_lobe / sim.star_size
+
+        if peak_mags[i, j] > thresholds[t]:
+            prob = sim.best_prob_all_declinations_estimate(precision=thresholds[t], threshold=1)
+            ax.text(periods[i, j], peak_mags[i, j], f'P={prob:.4f}',
+                    color='k', bbox=dict(facecolor=colors[i], alpha=0.8))
+            t += 1
+
+    ax.plot(periods[i], peak_mags[i], '-',
+            markersize=10, marker=styles[i], color=colors[i],
+            label=f'WD-WD ({sim.star_mass}$M_\u2609$, {sim.lens_mass}$M_\u2609$)')
+
+    idx = roche[i] < 1
+    ax.plot(periods[i, idx], peak_mags[i, idx], 'bo', fillstyle='none', markersize=12)
+
+# NS and BH lenses
+masses = np.array([2.0, 10.0, 30.0])
+colors = [np.ones(3) * c for c in [0.5, 0.3, 0.0]]
+styles = ['X', 'D', 'o']
+peak_mags = np.zeros((len(masses), len(orbits)))
+periods = np.zeros(peak_mags.shape)
+prob_low = np.zeros(peak_mags.shape)
+prob_high = np.zeros(peak_mags.shape)
+roche = np.zeros(peak_mags.shape)
+
+for i, m in enumerate(masses):
+    t = 0
+    sim.lens_mass = m
+    for j, a in enumerate(orbits):
+        sim.semimajor_axis = a
+        mag = sim.calculate()
+        periods[i, j] = sim.orbital_period * 3600
+        peak_mags[i, j] = np.max(mag - 1)
+        prob_low[i, j] = sim.best_prob_all_declinations_estimate(precision=thresholds[0], threshold=1)
+        prob_high[i, j] = sim.best_prob_all_declinations_estimate(precision=thresholds[1], threshold=1)
+        roche[i, j] = sim.roche_lobe / sim.star_size
+
+        if peak_mags[i, j] > thresholds[t]:
+            prob = sim.best_prob_all_declinations_estimate(precision=thresholds[t], threshold=1)
+            ax.text(periods[i, j], peak_mags[i, j],
+                    f'P={prob:.2f}', color='k', bbox=dict(facecolor='w', alpha=0.8))
+
+            t += 1
+
+    ax.plot(periods[i], peak_mags[i], '-',
+        markersize=10, marker=styles[i], color=colors[i],
+        label=f'WD-{sim.lens_type} ({sim.star_mass}$M_\u2609$, {sim.lens_mass}$M_\u2609$)')
+
+    idx = roche[i] < 1
+    ax.plot(periods[i, idx], peak_mags[i, idx], 'bo', fillstyle='none', markersize=12)
+
+ax.set_xlabel('Orbital period [s]')
+ax.set_ylabel('Max magnification')
+
+ax.set_xscale('log')
+ax.set_yscale('log')
+
+ax.plot([0], [0], 'bo', markersize=12, fillstyle='none', label='Roche lobe overflow')
+
+ax.plot(np.array([0, 1e9]), np.ones(2) * thresholds[0], '--k', label=f'{int(thresholds[0]*1000)}mmag threshold', alpha=0.8)
+ax.plot(ax.get_xlim(), np.ones(2) * thresholds[1], '--k', label=f'{int(thresholds[1]*1000)}mmag threshold', alpha=0.5)
+
+ax_min = 1e-6
+ax_max = 100
+
+ax.set_ylim(ax_min, ax_max)
+ax.set_xlim(3, 2e8)
+
+ax.plot(np.ones(2) * 60, ax.get_ylim(), ':k', alpha=0.3)
+ax.text(60*1.1, ax_max / 2, 'one minute')
+ax.plot(np.ones(2) * 3600, ax.get_ylim(), ':k', alpha=0.3)
+ax.text(3600*1.1, ax_max / 2, 'one hour')
+ax.plot(np.ones(2) * 3600 * 24, ax.get_ylim(), ':k', alpha=0.3)
+ax.text(3600 * 24 * 1.1, ax_max / 2, 'one day')
+ax.plot(np.ones(2) * 3600 * 24 * 365, ax.get_ylim(), ':k', alpha=0.3)
+ax.text(3600 * 24 * 365 * 1.1, ax_max / 2, 'one year')
+
+ax.plot([0], [0], linestyle='none', label='"P=$\ldots$": geometric prob.')
+
+ax.legend(loc="lower right")
+
+
+
+## save the plot
+
+plt.savefig('plots/mag_vs_period.pdf')
