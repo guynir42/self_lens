@@ -140,7 +140,7 @@ class Survey:
 
         # figure out the S/N for this lightcurve, and compare it to the precision we have at each distance
         # shorthand for lightcurve and timestamps
-        lc = (system.magnifications - 1) / dilution
+        lc = (system.magnifications - 1) * dilution
         ts = system.timestamps
         mid_idx = len(lc) // 2
 
@@ -157,8 +157,9 @@ class Survey:
         for p in prec:
             if np.all(det_lc > p):
                 # this should not happen in general, if there are enough points outside the flare
+                # raise ValueError('All lightcurve points are above precision level!')
                 print('All lightcurve points are above precision level!')
-                end_idx = len(lc[mid_idx:])
+                end_idx = len(det_lc) - 1
             else:
                 end_idx = np.argmin(det_lc > p)  # first index where lc dips below precision
 

@@ -24,6 +24,38 @@ class Grid:
         self.setup_small_scan()
         self.setup_default_surveys()
 
+    def setup_demo_scan(self, wd_lens=True):
+        """
+        Make a very small parameter set,
+        just to see that the code works.
+
+        :param wd_lens:
+            If True, will scan only white dwarf lenses,
+            including a mass range up to 1.4,
+            and multiple temperatures.
+            If False, will run only neutron stars and black holes,
+            with a single (irrelevant) temperature and larger
+            masses and mass steps.
+        """
+        self.star_masses = np.arange(0.2, 1.3, 0.5)
+        self.star_temperatures = np.array([5000, 10000])
+
+        if wd_lens:
+            self.lens_masses = np.arange(0.2, 1.3, 0.5)
+            self.lens_temperatures = np.array([5000, 10000])
+        else:
+            self.lens_masses = np.arange(1.0, 30, 3)
+            self.lens_temperatures = np.array([5000])
+
+        self.semimajor_axes = np.geomspace(0.0001, 10, 30)
+        self.declinations = np.linspace(0, 90, 10000)
+
+        num_pars = len(self.star_masses) * len(self.star_temperatures)
+        num_pars *= len(self.lens_masses) * len(self.lens_temperatures)
+        num_pars *= len(self.semimajor_axes)
+
+        print(f'Total number of parameters (excluding dec): {self.get_num_parameters()}')
+
     def setup_small_scan(self, wd_lens=True):
         """
         Make a small parameter set,
@@ -38,17 +70,17 @@ class Grid:
             masses and mass steps.
         """
 
-        self.star_masses = np.arange(0.2, 1.4, 0.1)
+        self.star_masses = np.arange(0.2, 1.4, 0.2)
         self.star_temperatures = np.array([5000, 7500, 10000])
 
         if wd_lens:
-            self.lens_masses = np.arange(0.2, 1.4, 0.1)
+            self.lens_masses = np.arange(0.2, 1.4, 0.2)
             self.lens_temperatures = np.array([5000, 7500, 10000])
         else:
             self.lens_masses = np.arange(1.5, 30, 0.5)
             self.lens_temperatures = np.array([5000])
 
-        self.semimajor_axes = np.geomspace(0.0001, 10, 300)
+        self.semimajor_axes = np.geomspace(0.0001, 10, 100)
         self.declinations = np.linspace(0, 90, 10000)
 
         num_pars = len(self.star_masses) * len(self.star_temperatures)
@@ -88,13 +120,14 @@ class Grid:
         print(f'Running a grid with {len(self.surveys)} surveys and {num} parameters (not including dec.). ')
         t0 = timer()
         count = 0
-        for sl, lens_temp in enumerate(self.lens_temperatures):
+        for lt, lens_temp in enumerate(self.lens_temperatures):
             for st, star_temp in enumerate(self.star_temperatures):
                 for ms, star_mass in enumerate(self.star_masses):
                     for ml, lens_mass in enumerate(self.lens_masses):
                         for a, sma in enumerate(self.semimajor_axes):
                             for d, dec in enumerate(self.declinations):
                                 try:
+                                    self.simulator.timestamps = None
                                     self.simulator.calculate(lens_temp=lens_temp,
                                                              lens_mass=lens_mass,
                                                              star_temp=star_temp,
@@ -113,19 +146,20 @@ class Grid:
                                     if len(self.simulator.syst.flare_prob[s.name]):
                                         flare_probs.append(max(self.simulator.syst.flare_prob[s.name]))
 
-                                if len(flare_probs) and np.all(np.array(flare_probs) == 0):
+                                if len(flare_probs) == 0 or np.all(np.array(flare_probs) == 0):
                                     break  # don't keep scanning declinations after all surveys can't detect anything
-
+                                self.simulator.syst.magnifications = None
+                                self.simulator.syst.timestamps = None
                                 self.systems.append(self.simulator.syst)  # add this system to the list
 
-                            count = len(self.systems)
-
+                            # count = len(self.systems)
+                            count += 1  # number of parameters already covered, not including declination
                             if count > 0 and count % div == 0:
                                 current_time = timer() - t0
                                 total_time = current_time / count * num
                                 print(f'count= {count:10d} / {num} | time= {current_time:.1f} / {total_time:.1f}s')
 
-        print(f'Successfully generated {count} systems in {timer() - t0:1.f}s.')
+        print(f'Successfully generated {len(self.systems)} systems in {timer() - t0:.1f}s.')
 
     def get_systems(self, **kwargs):
         """
@@ -187,3 +221,5 @@ class Grid:
 if __name__ == "__main__":
 
     g = Grid()
+    # g.setup_demo_scan()
+    g.run_simulation()
