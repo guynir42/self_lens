@@ -90,6 +90,23 @@ class Simulator:
         self.declination = 90 - new_value
 
     @property
+    def orbital_period(self):
+        if self.semimajor_axis is None:
+            return None
+
+        period = self.semimajor_axis ** (3 / 2) / np.sqrt(self.star_mass + self.lens_mass)
+        period *= 365.25 * 24  # convert from years to hours
+        return period
+
+    @orbital_period.setter
+    def orbital_period(self, period):
+        if period is None:
+            self.semimajor_axis = None
+            return
+        period /= 365.25 * 24  # convert from hours to years
+        self.semimajor_axis = (period * np.sqrt(self.star_mass + self.lens_mass)) ** (2 / 3)
+
+    @property
     def star_type(self):
         if self._star_type is not None:
             return self._star_type
@@ -218,8 +235,14 @@ class Simulator:
             if hasattr(self, key) and re.match('(star|lens)_.*', key) \
                     or key in ('declination', 'inclination', 'semimajor_axis', 'time_units', 'compact_source'):
                 setattr(self, key, val)
+            elif key == 'orbital_period':
+                pass
             else:
-                raise ValueError(f'Unkown input argument "{key}"')
+                raise ValueError(f'Unknown input argument "{key}"')
+
+        # after setting these, we can also check if orbital_period is given:
+        if 'orbital_period' in kwargs:
+            self.orbital_period = kwargs['orbital_period']
 
         if self.star_mass is None:
             raise ValueError('Must provide a mass for the source object.')
@@ -237,8 +260,8 @@ class Simulator:
             self.impact_parameter *= 215.032  # convert to solar radii
             self.impact_parameter /= self.einstein_radius  # convert to units of Einstein Radius
 
-        self.orbital_period = self.semimajor_axis ** (3 / 2) / np.sqrt(self.star_mass + self.lens_mass)
-        self.orbital_period *= 365.25 * 24  # convert from years to hours
+        # self.orbital_period = self.semimajor_axis ** (3 / 2) / np.sqrt(self.star_mass + self.lens_mass)
+        # self.orbital_period *= 365.25 * 24  # convert from years to hours
 
         # ref: https://ui.adsabs.harvard.edu/abs/1983ApJ...268..368E/abstract
         q = self.star_mass / self.lens_mass
@@ -741,22 +764,27 @@ class System:
         self._time_units = 'seconds'  # for the above-mentioned timestamps
         self.magnifications = None  # the measured lightcurve
 
+        self.surveys = []  # keep a list of all the surveys applied to this system
         # a few dictionaries to be filled by each survey,
         # each one keyed to the survey's name, and containing
         # the results: detection probability for different distances
         # and also the volume associated with each distance.
         self.distances = {}  # parsec
-        self.volumes = {}  # parsec^3
+        self.volumes = {}  # parsec^3 for each distance, for a single field
         self.apparent_mags = {}  # in the specific band
+        self.precisions = {}  # for each given distance
+        self.dilutions = {}  # how much is the lens light diluting the flare
+        self.flare_durations = {}  # duration above detection limit (sec)
         self.flare_prob = {}  # probability to detect flare at peak (i.e., best timing)
         self.visit_prob = {}  # probability of detection in one visit (including duty cycle)
-        self.total_prob = {}  # probability after multiple visit in the duration of the survey
+        self.total_prob = {}  # probability after multiple visits over the duration of the survey per field
         self.total_volumes = {}  # volumes observed over the duration of the survey
-        self.num_detections = {}  # how many detections per visit (on average)
-        self.footprints = {}  # the angular area (in square degrees) over the duration of the survey
-        self.flare_durations = {}  # duration above detection limit (sec)
-        self.dilutions = {}  # how much is the lens light diluting the flare in each survey
-        self.effective_volumes = {}  # how much space is covered, including the detection probability, for each survey
+        self.visit_detections = {}  # how many detections per visit per field (on average)
+        self.total_detections = {}  # how many detections per field over all visits
+
+        # how much space is covered, weighed by visit prob.
+        # multiply this by spatial density to get number of detections
+        self.effective_volumes = {}
 
         # for each parameter in the first block,
         # what are the intervals around the given values,
@@ -766,7 +794,7 @@ class System:
         # you must decide the lens mass range, maybe 0.35 to 0.45,
         # only then can you say how many "such systems" should exist
         self.par_ranges = {}  # for mass/size/temp of lens/star, inclination, semimajor axis
-        self.density = None  # how many such system we expect exist per parsec^3
+        self.spatial_density = None  # how many such system we expect exist per parsec^3
 
     @property
     def time_units(self):
@@ -777,6 +805,134 @@ class System:
         self.timestamps *= translate_time_units(self.time_units) / translate_time_units(new_units)
         self._time_units = new_units
 
+    def bolometric_mag(self):
+        """
+        Get the absolute magnitude of the system, not including the magnification.
+        The magnitude is bolometric (includes all wavelengths).
+
+        :return:
+            Magnitude measured on Earth for this system at 10pc.
+        """
+
+        flux = self.star_flux + self.lens_flux
+
+        # ref: https://www.iau.org/static/resolutions/IAU2015_English.pdf
+        return -2.5 * np.log10(flux) + 71.197425 + 17.5  # the 17.5 is to convert W->erg/s
+
+    def ab_mag(self, wavelength, bandwidth, get_dilution=False):
+        """
+        Find the absolute (10 pc) magnitude of the system in AB magnitudes
+        for the filter specified by wavelength and bandwidth.
+
+        :param wavelength: scalar float
+            central wavelength of the filter (assume tophat) in nm.
+        :param bandwidth: scalar float
+            width of the filter in nm.
+        :param get_dilution: boolean
+            if True will return a 2-tuple with the magnitude and
+            the dilution factor of the system.
+        :return: 2-tuple or scalar
+            if get_dilution is True:
+            - the magnitude in AB system based on the provided filter,
+                for a system at 10pc.
+            - the dilution factor for the lightcurve magnification
+                (1 is only the source, 0.5 for equal source/lens, etc).
+            if not, return only the magnitude
+        """
+        # a few important constants
+        c_nm = 2.99792458e17  # speed of light in nm/s
+        sun_radius = 6.957e10  # in cm
+        pc = 3.086e+18  # parsec in cm
+        one_over_h = 1 / 6.62607004e-27  # 1/h in units of erg * Hz
+
+        filt_bounds = (wavelength - bandwidth / 2, wavelength + bandwidth / 2)
+        filter_low_f = c_nm / max(filt_bounds)
+        filter_high_f = c_nm / min(filt_bounds)
+        flux1 = integ.quad(self.black_body, filter_low_f, filter_high_f, args=(self.star_temp, True))[0]
+        # integrate over surface of star, divide by sphere at 10pc
+        flux1 *= (self.star_size * sun_radius) ** 2 / (10 * pc) ** 2  # erg/s/cm^2
+
+        if self.lens_flux > 0 and self.lens_temp > 0:
+            flux2 = integ.quad(self.black_body, filter_low_f, filter_high_f, args=(self.star_temp, True))[0]
+            flux2 *= (self.star_size * sun_radius) ** 2 / (10 * pc) ** 2  # erg/s/cm^2
+        else:
+            flux2 = 0
+
+        # this flux is equivalent to flux from flat spectrum source with how many janskies?
+        # flat_source = (filter_high_f - filter_low_f)  # this is true if we don't count photons
+        flat_source = one_over_h * np.log(filter_high_f / filter_low_f)  # integrate over 1/(hf)
+        equiv_flux1 = flux1 / flat_source  # in erg/s/cm^2
+        equiv_flux2 = flux2 / flat_source
+
+        mag = -2.5 * np.log10(equiv_flux1 + equiv_flux2) - 48.60  # -2.5 * np.log10(equiv_flux / 3631e-23)
+
+        if get_dilution:
+            dilution = flux1 / (flux1 + flux2)
+            return mag, dilution
+        else:
+            return mag
+
+    def apply_distance(self, abs_mag, distance, wavelength=None, bandwidth=None):
+        """
+        Apply a distance modulus (and possibly extinction) to
+        :param abs_mag: float array or scalar
+            absolute magnitude (at 10pc) of the system.
+            can be a scalar or array, but the two first
+            inputs must be braodcastable.
+        :param distance: float array or scalar
+            distance to the system in pc.
+        :param wavelength: tbd
+        :param bandwidth: tbd
+        :return:
+            the magnitude after applying the
+            decrease in the amount of light
+            due to the distance (1/r^2 law)
+            and extinction (to be added).
+        """
+        mag = abs_mag + 5 * np.log10(distance / 10)
+
+        if wavelength is not None:
+            # TODO: calculate the extinction
+            # TODO: check if bandwidth is not None and use that, too
+            pass
+
+        return mag
+
+    @staticmethod
+    def black_body(f, temp, photons=False):
+        """
+        Black body radiation per frequency.
+
+        :param f: float array or scalar
+            Array or scalar of frequencies (in Hz).
+        :param temp: float array or scalar
+            Array or scalar of frequencies (in Kelvin).
+            The two first inputs must be broadcastable.
+        :param photons: bool
+            When true, will return the number of photons
+            in this frequency range, instead of the
+            flux spectral density.
+        :return:
+            The flux spectral density in units of
+            ergs per second per cm^2 per Hz per steradian.
+            If photons=True will instead give
+            photons per second per cm^2 per Hz per steradian.
+            In either case this number must be multiplied
+            by the surface area of the star,
+            and divided by the 4pi*D^2 to get the
+            flux at the distance D.
+        """
+
+        if photons:  # get the number of photons instead of the total flux
+            const1 = 6.990986484228638e-21  # 2 * pi / c ** 2 = 2 / 2.99792458e10 ** 2
+        else:
+            const1 = 4.632276581355286e-47  # 2 * pi * h / c ** 2 = 2 * 6.626070e-27 / 2.99792458e10 ** 2
+
+        const2 = 4.7992429647216633e-11  # h/k = 6.626070e-27 / 1.380649e-16
+
+        return const1 * f ** (3 - photons) / (np.exp(const2 * f / temp) - 1)
+
+    # to be deprecated:
     def bolometric_correction(self, wavelength=None, bandwidth=None):
         """
         Get a correction term to translate the bolometric magnitude
@@ -795,19 +951,19 @@ class System:
               If the fluxes are equal (inside the band!) the dilution is 0.5.
         """
         if wavelength is None or bandwidth is None:
-            return 0
+            return 0  # TODO: add the dilution in this case
 
-        filt_la1 = wavelength - bandwidth/2
-        filt_la2 = wavelength + bandwidth/2
+        filt_la1 = wavelength - bandwidth / 2
+        filt_la2 = wavelength + bandwidth / 2
 
-        bolometric1 = integ.quad(black_body, *find_lambda_range(self.star_temp), self.star_temp)[0]
-        in_band1 = integ.quad(black_body, filt_la1, filt_la2, self.star_temp)[0]
+        bolometric1 = integ.quad(black_body, *find_lambda_range(self.star_temp), args=(self.star_temp, True))[0]
+        in_band1 = integ.quad(black_body, filt_la1, filt_la2, args=(self.star_temp, True))[0]
         fraction1 = in_band1 / bolometric1
         # print(f'bolometric1= {bolometric1} | in_band1= {in_band1}')
 
         if self.lens_flux > 0 and self.lens_temp > 0:
-            bolometric2 = integ.quad(black_body, *find_lambda_range(self.lens_temp), self.lens_temp)[0]
-            in_band2 = integ.quad(black_body, filt_la1, filt_la2, self.lens_temp)[0]
+            bolometric2 = integ.quad(black_body, *find_lambda_range(self.lens_temp), args=(self.lens_temp, True))[0]
+            in_band2 = integ.quad(black_body, filt_la1, filt_la2, args=(self.lens_temp, True))[0]
             fraction2 = in_band2 / bolometric2
         else:
             fraction2 = 0
@@ -820,24 +976,14 @@ class System:
 
         return 2.5 * np.log10(ratio), dilution
 
-    def bolometric_mag(self, distance_pc):
+
+    def merger_time(self):
         """
-        Get the apparent magnitude of the system, not including the magnification,
-        given the distance (in pc). The magnitude is bolometric (i.e., it needs
-        a correction factor if using anything but a broadband filter).
-
-        :param distance_pc:
-            Distance to system, in parsec
-        :return:
-            Magnitude measured on Earth for this system at that distance
+        Calculate the merger time (in Gyr) for this system.
+        ref: https://ui.adsabs.harvard.edu/abs/2016ApJ...824...46B/abstract
         """
-
-        flux = self.star_flux + self.lens_flux
-
-        # ref: https://www.iau.org/static/resolutions/IAU2015_English.pdf
-        abs_mag = -2.5 * np.log10(flux) + 71.197425 + 17.5  # the 17.5 is to convert W->erg/s
-
-        return abs_mag + 5 * np.log10(distance_pc / 10)
+        return 47.925 * (self.star_mass + self.lens_mass) ** (1 / 3) \
+               / (self.star_mass * self.lens_mass) * (self.orbital_period / 24) ** (8 / 3)
 
     def is_detached(self):
         return self.roche_lobe > self.star_size
@@ -872,7 +1018,8 @@ class System:
         # add the period to compare to the flare time
         legend_handles.append(Line2D([0], [0], lw=0))
         period = self.orbital_period * 3600 / translate_time_units(self.time_units)
-        legend_labels.append(f'Period= {period:.1f} {self.time_units}')
+        # legend_labels.append(f'Period= {period:.1f} {self.time_units}')
+        legend_labels.append(self.period_string())
 
         # explicitely show the duty cycle
         if np.any(idx):
@@ -883,11 +1030,10 @@ class System:
         if isinstance(filter_list, str):
             filter_list = filter_list.replace('[', '').replace(']', '').replace("'", '').strip().split(',')
 
-        base_mag = self.bolometric_mag(distance_pc)
         mag_str = f'Mag (at {int(distance_pc):d}pc):'
         for i, filt in enumerate(filter_list):
             filter_pars = default_filter(filt.strip())
-            magnitude = base_mag - self.bolometric_correction(*filter_pars)[0]
+            magnitude = self.apply_distance(self.ab_mag(*filter_pars), distance_pc)
             if i % 3 == 0:
                 mag_str += '\n'
             mag_str += f' {filt}~{magnitude:.2f},'
@@ -968,7 +1114,116 @@ class System:
 
         return ax
 
+    def period_string(self):
+        P = self.orbital_period
+        if P < 0.01:
+            return f'{P * 3600:.2g} s'
+        if P < 0.1:
+            return f'{P * 60:.2g} min'
+        if P > 24:
+            return f'{P / 24:.2g} days'
 
+        return f'{P:.2g} h'
+
+    def print(self, pars=None, surveys=None):
+
+        par_dict = {
+            'inclination': ('i', 'deg'),
+            'einstein_radius': ('R_E', 'Rsun'),
+            'lens_mass': ('M_l', 'Msun'),
+            'lens_temp': ('T_l', 'K'),
+            'lens_size': ('R_l', 'Rsun'),
+            'lens_type': ('lens', ''),
+            'star_mass': ('M_s', 'Msun'),
+            'star_temp': ('T_s', 'K'),
+            'star_size': ('R_s', 'Rsun'),
+            'star_type': ('source', ''),
+            'semimajor_axis': ('a', 'AU'),
+            'orbital_period': ('P', 'h'),
+            'roche_lobe': ('Roche', 'Rsun'),
+            'source_size': ('R_source', 'R_E'),
+            'occulter_size': ('R_occulter', 'R_E'),
+            'impact_parameter': ('b', 'R_E')
+            }
+
+        if pars is None:
+            pars = [
+                ['lens_type', 'lens_mass', 'lens_size', 'lens_temp'],
+                ['star_type', 'star_mass', 'star_size', 'star_temp'],
+                ['semimajor_axis', 'orbital_period', 'inclination', 'impact_parameter'],
+                ['einstein_radius', 'source_size', 'occulter_size'],
+            ]
+
+        # a scalar string should be turned into a list with one member
+        if isinstance(pars, str):
+            pars = [pars]
+        if isinstance(pars, list):  # this fails if pars is False
+            for p_list in pars:
+                if not isinstance(p_list, list):
+                    p_list = [p_list]
+                new_str = []
+                for p in p_list:
+                    if p == 'orbital_period':
+                        new_str.append(self.period_string())
+                    elif p == 'inclination':
+                        if self.inclination < 90:
+                            new_str.append(f'90 - {90 - self.inclination:.2g} deg')
+                        else:
+                            new_str.append('90 deg')
+                    else:
+                        value = getattr(self, p)
+                        if isinstance(value, float) and value != 0:
+                            value = f'{value:.2g}'
+
+                        if p in par_dict:
+                            if value and par_dict[p][1]:
+                                new_str.append(f'{par_dict[p][0]}: {value} {par_dict[p][1]}')
+                            else:
+                                new_str.append(f'{par_dict[p][0]}: {value}')
+                        else:
+                            new_str.append(f'{p}: {value}')
+                print(' | '.join(new_str))
+
+        if surveys is None:
+            surveys = list(self.apparent_mags.keys())
+
+        # a scalar string should be turned into a list with one member
+        if isinstance(surveys, str):
+            surveys = [surveys]
+
+        if isinstance(surveys, list):  # this fails if surveys is False
+            for s in surveys:
+                print(f'Survey results for {s}:')
+
+                survey = next(sur for sur in self.surveys if sur.name == s)
+
+                series_time = survey.series_length * (survey.exposure_time + survey.dead_time)
+
+                new_str = []
+                t_flare = max(self.flare_durations[s])
+                new_str.append(f'flare duration: {t_flare:.2g} s')
+                new_str.append(f'duty cycle: {t_flare / self.orbital_period / 3600:.2g}')
+                new_str.append(f'period: {self.period_string()}')
+                new_str.append(f'series time: {series_time:.2g} s')
+                print(' | '.join(new_str))
+
+                new_str = []
+                new_str.append(f'flare prob: {max(self.flare_prob[s]):.2g}')
+                visit_prob = max(self.visit_prob[s])
+                new_str.append(f'visit prob: {visit_prob:.2g}')
+                if visit_prob != max(self.visit_detections[s]):
+                    new_str.append(f'visit det: {max(self.visit_detections[s]):.2g}')
+                new_str.append(f'total det: {max(self.total_detections[s]):.2g}')
+                print(' | '.join(new_str))
+
+                new_str = []
+                new_str.append(f'max dist: {max(self.distances[s]):.2g} pc')
+                new_str.append(f'volume: {np.sum(self.volumes[s]):.2g} pc^3')
+                new_str.append(f'total vol: {np.sum(self.total_volumes[s]):.2g} pc^3')
+                new_str.append(f'eff. vol: {self.effective_volumes[s]:.2g} pc^3')
+                print(' | '.join(new_str))
+
+# to be deprecated:
 def find_lambda_range(temp):
     """
     Find the range of temperatures that are relevant for
@@ -986,8 +1241,8 @@ def find_lambda_range(temp):
     la2 = best_la*10
     return la1, la2
 
-
-def black_body(la, temp):  # black body radiation
+# to be deprecated:
+def black_body(la, temp, photons=False):  # black body radiation
     """
     get the amount of radiation expected from a black body
     of the given temperature "temp", at the given wavelengths "la".
@@ -995,14 +1250,18 @@ def black_body(la, temp):  # black body radiation
         wavelength(s) where the radiation should be calculated.
     :param temp: float scalar
         temperature of the black body.
+    :param photons: boolean
+        use this to get the BB number of photons,
+        instead of total energy.
     :return:
         return the radiation (in units of Watts per steradian per m^2 per nm)
+        if photons=True, returns photons per second per steradian per m^2 per nm.
     """
     const = 0.014387773538277204  # h*c/k_b = 6.62607004e-34 * 299792458 / 1.38064852e-23
     amp = 1.1910429526245744e-25  # 2*h*c**2 * (nm / m) = 2*6.62607004e-34 * 299792458**2 / 1e9 the last term is units
     la = la * 1e-9  # convert wavelength from nm to m
 
-    return amp / (la ** 5 * (np.exp(const/(la * temp)) - 1))
+    return amp / (la ** (5 - photons) * (np.exp(const / (la * temp)) - 1))
 
 
 def translate_time_units(units):
@@ -1063,9 +1322,9 @@ def default_filter(filter_name):
 def guess_compact_type(mass):
     if mass is None:
         return None
-    elif mass <= 1.454:
+    elif mass <= 1.2:  # was 1.454
         return 'WD'
-    elif mass <= 2.8:
+    elif mass <= 2.5: # was 2.8
         return 'NS'
     else:
         return 'BH'
