@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from timeit import default_timer as timer
 
+import xarray as xr
+
 import simulator
 import survey
 
@@ -20,6 +22,7 @@ class Grid:
         self.simulator = simulator.Simulator()  # use this to make lightucrves
         self.surveys = None  # a list of survey.Survey objects, applied to each system
         self.systems = None  # a list of systems to save the results of each survey
+        self.dataset = None  # an xarray dataset with the summary of the results
 
         self.setup_small_scan()
         self.setup_default_surveys()
@@ -142,7 +145,10 @@ class Grid:
 
                                 flare_probs = []
                                 for s in self.surveys:
-                                    s.apply_detection_statistics(self.simulator.syst)
+                                    try:
+                                        s.apply_detection_statistics(self.simulator.syst)
+                                    except Exception as e:
+                                        print(e)
                                     if len(self.simulator.syst.flare_prob[s.name]):
                                         flare_probs.append(max(self.simulator.syst.flare_prob[s.name]))
 
@@ -161,9 +167,173 @@ class Grid:
 
         print(f'Successfully generated {len(self.systems)} systems in {timer() - t0:.1f}s.')
 
+    def summarize(self):
+        """
+        Put the results of the simulation into an xarray dataset.
+        """
+
+        t0 = timer()
+        # first pass of the data:
+        star_temps = []
+        star_masses = []
+        lens_temps = []
+        lens_masses = []
+        smas = []
+        decs = []
+        for s in self.systems:
+            star_temps.append(s.star_temp)
+            star_masses.append(s.star_mass)
+            lens_temps.append(s.lens_temp)
+            lens_masses.append(s.lens_mass)
+            smas.append(s.semimajor_axis)
+            decs.append(s.declination)
+
+        star_temps = np.unique(star_temps)
+        star_masses = np.unique(star_masses)
+        lens_temps = np.unique(lens_temps)
+        lens_masses = np.unique(lens_masses)
+        smas = np.unique(smas)
+        decs = np.unique(decs)
+
+        coords = {
+             'lens_mass': lens_masses,
+             'lens_temp': lens_temps,
+             'star_mass': star_masses,
+             'star_temp': star_temps,
+             'declination': decs,
+             'semimajor_axis': smas,
+         }
+        survey_names = [s.name for s in g.surveys]
+        coord_names = list(coords.keys())
+        coord_lengths = tuple(len(v) for v in coords.values())
+
+        coords['survey'] = survey_names  # add another coordinate to keep track of different survey's results
+
+        nan_array = np.empty(coord_lengths)
+        nan_array[:] = np.nan
+        zeros_array = np.zeros(coord_lengths + (len(self.surveys),))
+
+        data_vars = {
+            'system_index': (coord_names, nan_array.copy()),
+            'orbital_period': (coord_names, nan_array.copy()),
+            'distance': (coord_names + ['survey'], zeros_array.copy()),
+            'volume': (coord_names + ['survey'], zeros_array.copy()),
+            'total_volume': (coord_names + ['survey'], zeros_array.copy()),
+            'flare_duration': (coord_names + ['survey'], zeros_array.copy()),
+            'flare_prob': (coord_names + ['survey'], zeros_array.copy()),
+            'duty_cycle': (coord_names + ['survey'], zeros_array.copy()),
+            'visit_prob': (coord_names + ['survey'], zeros_array.copy()),
+            'total_prob': (coord_names + ['survey'], zeros_array.copy()),
+            'visit_detections': (coord_names + ['survey'], zeros_array.copy()),
+            'total_detections': (coord_names + ['survey'], zeros_array.copy()),
+            'effective_volume': (coord_names + ['survey'], zeros_array.copy()),
+        }
+
+        ds = xr.Dataset(coords=coords, data_vars=data_vars)
+
+        # edit the coordinate attributes
+        ds.lens_mass.attrs = dict(units='Solar mass', long_name='Lens mass')
+        ds.star_mass.attrs = dict(units='Solar mass', long_name='Source mass')
+        ds.lens_temp.attrs = dict(units='K', long_name='Lens temperature')
+        ds.star_temp.attrs = dict(units='K', long_name='Source temperature')
+        ds.declination.attrs = dict(units='deg', long_name='Declination (90-i)')
+        ds.semimajor_axis.attrs = dict(units='AU', long_name='Semimajor axis')
+
+        # edit the dataset attributes
+        ds.system_index.attrs = dict(
+            long_name='System internal index',
+            doc='The index of this system in self.systems list.'
+        )
+        ds.orbital_period.attrs = dict(
+            long_name='Orbital period',
+            units='hours',
+            doc='The orbital period of the system given its semimajor axis and masses.'
+        )
+        ds.distance.attrs = dict(
+            long_name='Maximal visible distance',
+            units='pc',
+            doc='The largest distance at which this system can be detected.'
+        )
+        ds.volume.attrs = dict(
+            long_name='Total accessible volume.',
+            units='pc^3',
+            doc='The space volume around observer where this system can be detected.'
+        )
+        ds.total_volume.attrs = dict(
+            long_name='Total volume covered.',
+            units='pc^3',
+            doc='The space volume covered by all fields in the survey.'
+        )
+        ds.flare_duration.attrs = dict(
+            long_name='Flare duration',
+            units='s',
+            doc='The maximal duration of the flare for all distances/precisions.'
+        )
+        ds.flare_prob.attrs = dict(
+            long_name='Flare probability',
+            doc='The best probability to detect a flare for all distances/precisions, '
+                'assuming best possible timing.'
+        )
+        ds.duty_cycle.attrs = dict(
+            long_name= 'Duty cycle',
+            doc='What fraction of the orbital period is the flare detectable, '
+                'for the best distance/precision of this survey. '
+        )
+        ds.visit_prob.attrs = dict(
+            long_name='Visit probability',
+            doc='The best probability to detect a flare for all distances/precisions, '
+                'assuming a single visit to this system.'
+        )
+        ds.total_prob.attrs = dict(
+            long_name='Total probability',
+            doc='The best probability to detect a flare for all distances/precisions, '
+                'assuming multiple visits to this system over the duration of the survey.'
+        )
+        ds.visit_detections.attrs = dict(
+            long_name='Number of detections per visit',
+            doc='The best expected number of detections for all distances/precisions, '
+                'assuming a single visit to this system.'
+        )
+        ds.total_detections.attrs = dict(
+            long_name='Number of detections total',
+            doc='The best expected number of detections for all distances/precisions, '
+                'assuming multiple visits to this system over the duration of the survey.'
+        )
+        ds.effective_volume.attrs = dict(
+            long_name='Effective volume',
+            units='pc^3',
+            doc='Total volume for systems of this kind in this survey. '
+                'Should be multiplied by the space density of objects'
+                'to get the total expected number of detections.'
+        )
+
+        self.dataset = ds
+
+        # second pass on the data:
+        for i, s in enumerate(self.systems):
+            indexer = {k: getattr(s, k) for k in coord_names}
+            ds.system_index.loc[indexer] = i
+            ds.orbital_period.loc[indexer] = s.orbital_period
+            for sur in survey_names:
+                indexer['survey'] = sur
+                if len(s.distances[sur]):  # if not, leave zeros for all values
+                    ds.distance.loc[indexer] = max(s.distances[sur])
+                    ds.volume.loc[indexer] = max(s.volumes[sur])
+                    ds.total_volume.loc[indexer] = max(s.total_volumes[sur])
+                    ds.flare_duration.loc[indexer] = max(s.flare_durations[sur])
+                    ds.flare_prob.loc[indexer] = max(s.flare_prob[sur])
+                    ds.duty_cycle.loc[indexer] = max(s.flare_prob[sur]) / (s.orbital_period * 3600)
+                    ds.visit_prob.loc[indexer] = max(s.visit_prob[sur])
+                    ds.total_prob.loc[indexer] = max(s.total_prob[sur])
+                    ds.visit_detections.loc[indexer] = max(s.visit_detections[sur])
+                    ds.total_detections.loc[indexer] = max(s.total_detections[sur])
+                    ds.effective_volume.loc[indexer] = s.effective_volumes[sur]
+
+        print(f'Time to convert results to dataset: {timer() - t0:.2g}s')
+
     def get_systems(self, **kwargs):
         """
-        Get all systems that match certain creteria.
+        Get all systems that match certain criteria.
         E.g., to get all systems with lens_mass=3.0 use:
         >> system_list = grid.get_systems(lens_mass=3.0)
         To get systems fitting a range of parameter values
@@ -219,7 +389,8 @@ class Grid:
 
 
 if __name__ == "__main__":
-
+    pass
     g = Grid()
-    # g.setup_demo_scan()
+    g.setup_demo_scan()
     g.run_simulation()
+    g.summarize()

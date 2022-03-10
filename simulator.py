@@ -745,7 +745,7 @@ class System:
         self.semimajor_axis = None  # in AU
         self.orbital_period = None  # in units of hours
         self.roche_lobe = None  # in units of solar radii
-        self.inclination = None  # orbital inclination (degrees)
+        self.declination = None  # 90 - i, the orbital inclination (degrees)
         self.star_mass = None  # in Solar mass units
         self.star_type = None  # what kind of object: "star", "WD", "NS", "BH"
         self.star_temp = None  # in Kelvin
@@ -804,6 +804,14 @@ class System:
     def time_units(self, new_units):
         self.timestamps *= translate_time_units(self.time_units) / translate_time_units(new_units)
         self._time_units = new_units
+
+    @property
+    def inclination(self):
+        return 90 - self.declination
+
+    @inclination.setter
+    def inclination(self, new_value):
+        self.declination = 90 - new_value
 
     def bolometric_mag(self):
         """
@@ -975,7 +983,6 @@ class System:
         dilution = (self.star_flux * fraction1) / (self.star_flux * fraction1 + self.lens_flux * fraction2)
 
         return 2.5 * np.log10(ratio), dilution
-
 
     def merger_time(self):
         """

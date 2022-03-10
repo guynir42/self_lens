@@ -142,7 +142,7 @@ class Survey:
         system.volumes[self.name] = np.array([])  # single visit space volume for those distances * field of view (pc^3)
         system.apparent_mags[self.name] = np.array([])  # magnitude of the system at given distance (in survey's filter)
         system.precisions[self.name] = np.array([])  # precision measured for each apparent magnitude
-        system.total_volumes[self.name] = np.array([])  # volume for all visits over all fields and duration of survey
+        system.total_volumes[self.name] = np.array([])  # volume for all fields
         system.dilutions[self.name] = 1.0  # dilution factor of two bright sources, at this filter
 
         system.flare_durations[self.name] = np.array([])  # duration the flare is above threshold, at each distance
@@ -176,6 +176,9 @@ class Survey:
             prec = np.ones(len(mag)) * self.precision
         else:
             prec = np.interp(mag, self.mag_list, self.prec_list)  # interpolate the precision at given magnitudes
+
+        if len(prec) == 0:
+            return  # cannot observe this target at all, we have no precision for this magnitude
 
         # figure out the S/N for this lightcurve, and compare it to the precision we have at each distance
         # shorthand for lightcurve and timestamps
@@ -229,30 +232,30 @@ class Survey:
         system.flare_durations[self.name] = flare_time_per_distance
         system.precisions[self.name] = prec
 
-        best_precision_idx = np.argmax(prec)  # index of best precision
+        best_precision_idx = np.argmax(prec) if len(prec) else []  # index of best precision
         best_precision = prec[best_precision_idx]
         best_flare_time = flare_time_per_distance[best_precision_idx]
 
         period = system.orbital_period * 3600  # shorthand
-        (peak_prob, mean_prob, num_detections) = self.calc_prob(lc, ts, prec, best_precision, best_flare_time, period)
+        if len(prec):  # only calculate probabilities for distances that have any chance of detection
+            (peak_prob, mean_prob, num_detections) = self.calc_prob(lc, ts, prec, best_precision, best_flare_time, period)
+            if self.exposure_time > period:  # this only applies to simple S/N case of diluted signal
+                pass  # TODO: figure out this case later
 
-        if self.exposure_time > period:  # this only applies to simple S/N case of diluted signal
-            pass  # TODO: figure out this case later
+            system.flare_prob[self.name] = peak_prob
+            system.visit_prob[self.name] = mean_prob
+            system.visit_detections[self.name] = num_detections
 
-        system.flare_prob[self.name] = peak_prob
-        system.visit_prob[self.name] = mean_prob
-        system.visit_detections[self.name] = num_detections
+            # the probability to find at least one flare per system (cannot exceed 1)
+            system.total_prob[self.name] = 1 - (1 - mean_prob) ** self.num_visits
 
-        # the probability to find at least one flare per system (cannot exceed 1)
-        system.total_prob[self.name] = 1 - (1 - mean_prob) ** self.num_visits
+            # average number of detections over many visits can exceed 1
+            system.total_detections[self.name] = num_detections * self.num_visits
 
-        # average number of detections over many visits can exceed 1
-        system.total_detections[self.name] = num_detections * self.num_visits
-
-        # if total_detections is large, can accumulate more effective volume than volume
-        # total_detections assumes the volume contains one system
-        # to get the actual number of detections you need to multiply effective volume with spatial density
-        system.effective_volumes[self.name] = np.sum(system.total_volumes[self.name] * system.total_detections[self.name])
+            # if total_detections is large, can accumulate more effective volume than volume
+            # total_detections assumes the volume contains one system
+            # to get the actual number of detections you need to multiply effective volume with spatial density
+            system.effective_volumes[self.name] = np.sum(system.total_volumes[self.name] * system.total_detections[self.name])
 
         # consider what happens if the survey does exist in the list, should it be updated??
         if self.name not in (s.name for s in system.surveys):
