@@ -900,7 +900,8 @@ class System:
         mag = abs_mag + 5 * np.log10(distance / 10)
 
         if wavelength is not None:
-            # TODO: calculate the extinction
+            mag += distance / 1000  # the simplest prescription of 1mag / kpc
+            # TODO: calculate the extinction using a better model!
             # TODO: check if bandwidth is not None and use that, too
             pass
 
@@ -1026,12 +1027,12 @@ class System:
         legend_handles.append(Line2D([0], [0], lw=0))
         period = self.orbital_period * 3600 / translate_time_units(self.time_units)
         # legend_labels.append(f'Period= {period:.1f} {self.time_units}')
-        legend_labels.append(self.period_string())
+        legend_labels.append(f'Period= {self.period_string()}')
 
-        # explicitely show the duty cycle
+        # explicitly show the duty cycle
         if np.any(idx):
             legend_handles.append(Line2D([0], [0], lw=0))
-            legend_labels.append(f'Duty cycle= {width / period:.2e}')
+            legend_labels.append(f'Duty cycle= 1/{period / width:.1f}')
 
         # add the magnitudes at distance_pc
         if isinstance(filter_list, str):
@@ -1040,7 +1041,7 @@ class System:
         mag_str = f'Mag (at {int(distance_pc):d}pc):'
         for i, filt in enumerate(filter_list):
             filter_pars = default_filter(filt.strip())
-            magnitude = self.apply_distance(self.ab_mag(*filter_pars), distance_pc)
+            magnitude = self.apply_distance(self.ab_mag(*filter_pars), distance_pc, *filter_pars)
             if i % 3 == 0:
                 mag_str += '\n'
             mag_str += f' {filt}~{magnitude:.2f},'

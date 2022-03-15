@@ -7,6 +7,7 @@ import xarray as xr
 import simulator
 import survey
 
+
 class Grid:
 
     def __init__(self):
@@ -50,12 +51,8 @@ class Grid:
             self.lens_masses = np.arange(1.0, 30, 3)
             self.lens_temperatures = np.array([5000])
 
-        self.semimajor_axes = np.geomspace(0.0001, 10, 30)
+        self.semimajor_axes = np.geomspace(1e-3, 10, 30)
         self.declinations = np.linspace(0, 90, 10000)
-
-        num_pars = len(self.star_masses) * len(self.star_temperatures)
-        num_pars *= len(self.lens_masses) * len(self.lens_temperatures)
-        num_pars *= len(self.semimajor_axes)
 
         print(f'Total number of parameters (excluding dec): {self.get_num_parameters()}')
 
@@ -73,22 +70,18 @@ class Grid:
             masses and mass steps.
         """
 
-        self.star_masses = np.arange(0.2, 1.4, 0.2)
-        self.star_temperatures = np.array([5000, 7500, 10000])
+        self.star_masses = np.round(np.arange(0.2, 1.2, 0.2), 2)
+        self.star_temperatures = np.arange(5000, 30000, 5000)
 
         if wd_lens:
-            self.lens_masses = np.arange(0.2, 1.4, 0.2)
-            self.lens_temperatures = np.array([5000, 7500, 10000])
+            self.lens_masses = np.round(np.arange(0.2, 1.2, 0.2), 2)
+            self.lens_temperatures = np.arange(5000, 30000, 5000)
         else:
-            self.lens_masses = np.arange(1.5, 30, 0.5)
+            self.lens_masses = np.round(np.arange(1.5, 30, 0.5), 2)
             self.lens_temperatures = np.array([5000])
 
-        self.semimajor_axes = np.geomspace(0.0001, 10, 100)
-        self.declinations = np.linspace(0, 90, 10000)
-
-        num_pars = len(self.star_masses) * len(self.star_temperatures)
-        num_pars *= len(self.lens_masses) * len(self.lens_temperatures)
-        num_pars *= len(self.semimajor_axes)
+        self.semimajor_axes = np.geomspace(1e-3, 10, 100)
+        self.declinations = np.linspace(0, 90, 90001)
 
         print(f'Total number of parameters (excluding dec): {self.get_num_parameters()}')
 
@@ -125,8 +118,8 @@ class Grid:
         count = 0
         for lt, lens_temp in enumerate(self.lens_temperatures):
             for st, star_temp in enumerate(self.star_temperatures):
-                for ms, star_mass in enumerate(self.star_masses):
-                    for ml, lens_mass in enumerate(self.lens_masses):
+                for ml, lens_mass in enumerate(self.lens_masses):
+                    for ms, star_mass in enumerate(self.star_masses):
                         for a, sma in enumerate(self.semimajor_axes):
                             for d, dec in enumerate(self.declinations):
                                 try:
@@ -196,14 +189,14 @@ class Grid:
         decs = np.unique(decs)
 
         coords = {
-             'lens_mass': lens_masses,
-             'lens_temp': lens_temps,
-             'star_mass': star_masses,
-             'star_temp': star_temps,
-             'declination': decs,
-             'semimajor_axis': smas,
-         }
-        survey_names = [s.name for s in g.surveys]
+            'lens_temp': lens_temps,
+            'star_temp': star_temps,
+            'lens_mass': lens_masses,
+            'star_mass': star_masses,
+            'semimajor_axis': smas,
+            'declination': decs,
+        }
+        survey_names = [s.name for s in self.surveys]
         coord_names = list(coords.keys())
         coord_lengths = tuple(len(v) for v in coords.values())
 
@@ -314,40 +307,145 @@ class Grid:
             indexer = {k: getattr(s, k) for k in coord_names}
             ds.system_index.loc[indexer] = i
             ds.orbital_period.loc[indexer] = s.orbital_period
+
             for sur in survey_names:
                 indexer['survey'] = sur
-                if len(s.distances[sur]):  # if not, leave zeros for all values
+                if len(s.distances[sur]):  # if not, leave zeros for all
                     ds.distance.loc[indexer] = max(s.distances[sur])
-                    ds.volume.loc[indexer] = max(s.volumes[sur])
-                    ds.total_volume.loc[indexer] = max(s.total_volumes[sur])
+                    ds.volume.loc[indexer] = np.sum(s.volumes[sur])
+                    ds.total_volume.loc[indexer] = np.sum(s.total_volumes[sur])
                     ds.flare_duration.loc[indexer] = max(s.flare_durations[sur])
                     ds.flare_prob.loc[indexer] = max(s.flare_prob[sur])
-                    ds.duty_cycle.loc[indexer] = max(s.flare_prob[sur]) / (s.orbital_period * 3600)
+                    ds.duty_cycle.loc[indexer] = max(s.flare_durations[sur]) / (s.orbital_period * 3600)
                     ds.visit_prob.loc[indexer] = max(s.visit_prob[sur])
                     ds.total_prob.loc[indexer] = max(s.total_prob[sur])
                     ds.visit_detections.loc[indexer] = max(s.visit_detections[sur])
                     ds.total_detections.loc[indexer] = max(s.total_detections[sur])
                     ds.effective_volume.loc[indexer] = s.effective_volumes[sur]
 
-        print(f'Time to convert results to dataset: {timer() - t0:.2g}s')
+        print(f'Time to convert results to dataset: {timer() - t0:.1f}s')
 
-    def get_systems(self, **kwargs):
+    def effective_volume_marginal_dec(self):
+        if self.dataset is None:
+            raise ValueError('Must have a dataset first!')
+        ds = self.dataset
+        dec = ds.declination * np.pi / 180
+        dec_step = dec[1] - dec[0]  # do something more complicated if uneven steps
+        new_ev = (ds.effective_volume * np.cos(dec) * dec_step).sum(dim='declination')
+        return new_ev
+
+    def get_probability_model(self, sma_dist=0, lens_mass_dist=0, star_mass_dist=0, lens_temp_dist=0, star_temp_dist=0):
         """
-        Get all systems that match certain criteria.
-        E.g., to get all systems with lens_mass=3.0 use:
-        >> system_list = grid.get_systems(lens_mass=3.0)
-        To get systems fitting a range of parameter values
-        use a 2-tuple instead of a single value.
+        generate a DataArray with the same dimensions
+        as the grid scan results dataset,
+        (without survey and declination axes)
+        which contains the probability to find
+        a system with the given parameters.
+        The total probability over all parameters
+        in range sums to one.
+        Multiply this model by the effective
+        volume (marginalized over declinations)
+        and sum to get the reciprocal to the
+        space density of binaries required
+        to make a detection.
+        Alternatively, multiply the sum
+        by the space density to get
+        the total number of expected
+        detections.
 
-        A list of possible parameters:
-        - Source properties: star_mass, star_size, star_temp,
-        - Lens properties:
-        - Orbital properties:
+        Each parameter can be a scalar,
+        in which case it is used as a power law index,
+        or as a vector of the appropriate length,
+        containing the relative probability
+        to get each value in the axis.
 
-        Returns a list of all systems matching the requested
-        parameters. If no parameters are requested,
-        simply returns self.systems.
+        :param sma_dist: float scalar or array
+            distribution or power law index for the semimajor axis probabilities.
+        :param lens_mass_dist: float scalar or array
+            distribution or power law index for the lens mass axis probabilities.
+        :param star_mass_dist: float scalar or array
+            distribution or power law index for the star mass axis probabilities.
+        :param lens_temp_dist: float scalar or array
+            distribution or power law index for the lens temperature axis probabilities.
+        :param star_temp_dist: float scalar or array
+            distribution or power law index for the star temperature axis probabilities.
+        :return:
+            a DataArray with the same dims as the main result dataset,
+            excluding "survey" and "declinations".
+            Multiply this by the declination marginalized
+            effective volume and sum all axes to get
+            the reciprocal of the space density of objects.
         """
+        if self.dataset is None:
+            raise ValueError('Must have a dataset first!')
+
+        if sma_dist is None:
+            sma_dist = 0
+        if hasattr(sma_dist, '__len__'):
+            if len(self.dataset.semimajor_axis) != len(sma_dist):
+                raise ValueError('Mismatch in size of semimajor axis distribution.')
+        else:  # if scalar, apply it as power law
+            sma_dist = self.dataset.semimajor_axis ** sma_dist
+
+        if lens_mass_dist is None:
+            lens_mass_dist = 0
+        if hasattr(lens_mass_dist, '__len__'):
+            if len(self.dataset.lens_mass) != len(lens_mass_dist):
+                raise ValueError('Mismatch in size of lens mass distribution.')
+        else:  # if scalar, apply it as power law
+            lens_mass_dist = self.dataset.lens_mass ** lens_mass_dist
+
+        if star_mass_dist is None:
+            star_mass_dist = 0
+        if hasattr(star_mass_dist, '__len__'):
+            if len(self.dataset.star_mass) != len(star_mass_dist):
+                raise ValueError('Mismatch in size of star mass distribution.')
+        else:  # if scalar, apply it as power law
+            star_mass_dist = self.dataset.star_mass ** star_mass_dist
+
+        if lens_temp_dist is None:
+            lens_temp_dist = 0
+        if hasattr(lens_temp_dist, '__len__'):
+            if len(self.dataset.lens_temp) != len(lens_temp_dist):
+                raise ValueError('Mismatch in size of lens temperature distribution.')
+            lens_temp_dist = xr.DataArray(data=lens_temp_dist, coord=self.dataset.lens_temp)
+        else:  # if scalar, apply it as power law
+            lens_temp_dist = self.dataset.lens_temp ** lens_temp_dist
+
+        if star_temp_dist is None:
+            star_temp_dist = 0
+        if hasattr(star_temp_dist, '__len__'):
+            if len(self.dataset.star_temp) != len(star_temp_dist):
+                raise ValueError('Mismatch in size of star temperature distribution.')
+            star_temp_dist = xr.DataArray(data=star_temp_dist, coord=self.dataset.star_temp)
+        else:  # if scalar, apply it as power law
+            star_temp_dist = self.dataset.star_temp ** star_temp_dist
+
+        prob = lens_temp_dist * star_temp_dist * lens_mass_dist * star_mass_dist * sma_dist
+        prob = prob / np.sum(prob)
+
+        new_arr = xr.full_like(self.dataset.effective_volume, 0)
+        new_arr = new_arr.isel(survey=0, declination=0)  # get rid of unneeded coordinates
+        new_arr.attrs['long_name'] = 'Probability model'
+        new_arr.attrs['doc'] = 'Probability to find each type of system.'
+        if 'units' in new_arr.attrs:
+            del new_arr.attrs['units']
+        new_arr.data = prob
+
+        self.dataset['probability_model'] = new_arr
+
+        return new_arr
+
+    def get_total_volume(self):
+
+        if 'probability_model' not in self.dataset:
+            raise KeyError('Need to first calculate a probability model!')
+
+        eff = self.effective_volume_marginal_dec()
+        prob = self.dataset.probability_model
+
+        return (eff * prob).sum()
+
 
     def total_detections(self, priors=None):
         """
@@ -388,9 +486,15 @@ class Grid:
         """
 
 
+
+
 if __name__ == "__main__":
-    pass
     g = Grid()
-    g.setup_demo_scan()
+    # g.setup_demo_scan()
     g.run_simulation()
     g.summarize()
+    g.get_probability_model()
+    total_vol = float(g.get_total_volume())
+    print(f'total volume: {total_vol:.1f}pc^3')
+    # g.datset = xr.load_dataset('saved/grid_data.nc')
+

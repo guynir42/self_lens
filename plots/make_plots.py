@@ -175,3 +175,17 @@ la = np.linspace(200, 1200, 1000)
 f = simulator.black_body(la, 5778)
 
 plt.plot(la, f)
+
+
+## show the grid scan results
+
+# assume there's a dataset called ds
+
+# define a function to mariginalize the declinations
+def marginalize_dec(ds):
+    dec = ds.declination * np.pi / 180
+    dec_step = dec[1]-dec[0]  # do something more complicated if uneven steps
+    new_ev = (ds.effective_volume * np.cos(dec) * dec_step).sum(dim='declination')
+    return new_ev
+
+new_ev = marginalize_dec(ds)
