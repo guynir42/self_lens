@@ -448,7 +448,7 @@ class TransferMatrix:
                 d = np.sum(d, axis=0)
             else:
                 d = d[0, :]
-            out_data[i] = d * occulter_frac[i]
+            out_data[i] = d * occulter_frac[data.shape[0] - i - 1]
 
         out_data = np.sum(out_data, axis=0)
 

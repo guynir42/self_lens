@@ -60,6 +60,7 @@ masses = np.array([0.3, 0.6, 1.0, 1.2])
 styles = ['*', 'v', 's', 'p']
 orbits = np.geomspace(0.0001, 1, 60)
 peak_mags = np.zeros((len(masses), len(orbits)))
+source_sizes = np.zeros(peak_mags.shape)
 periods = np.zeros(peak_mags.shape)
 prob_low = np.zeros(peak_mags.shape)
 prob_high = np.zeros(peak_mags.shape)
@@ -71,6 +72,7 @@ for i, m in enumerate(masses):
     for j, a in enumerate(orbits):
         sim.semimajor_axis = a
         mag = sim.calculate()
+        source_sizes[i, j] = sim.source_size
         periods[i, j] = sim.orbital_period * 3600
         peak_mags[i, j] = np.max(mag - 1)
         prob_low[i, j] = sim.best_prob_all_declinations_estimate(precision=thresholds[0], threshold=1)
@@ -140,7 +142,7 @@ ax.set_yscale('log')
 
 ax.plot([0], [0], 'bo', markersize=12, fillstyle='none', label='Roche lobe overflow')
 
-ax_min = 2e-3
+ax_min = 2e-7
 ax_max = 50
 
 ax.set_ylim(ax_min, ax_max)

@@ -99,3 +99,26 @@ def test_max_magnification(sim):
     sim.calculate()
 
     assert np.abs(np.max(sim.magnifications) - 9.4) < 0.02
+
+
+def test_smoothness(sim):
+    sim.star_mass = 0.6
+    sim.lens_mass = 1.0
+    sim.declination = 0
+
+    sma = np.linspace(0.020, 0.025, 100)
+    mag = []
+    for a in sma:
+        sim.semimajor_axis = a
+        mag.append(max(sim.calculate()))
+
+    plt.plot(sma, mag, '-x')
+    plt.yscale('log')
+    plt.show(block=True)
+
+    # making the semimajor axis larger should
+    # consistently make the magnifications larger
+    assert all(np.diff(mag) > 0)
+
+
+
