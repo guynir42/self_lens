@@ -25,7 +25,7 @@ class Grid:
         self.systems = None  # a list of systems to save the results of each survey
         self.dataset = None  # an xarray dataset with the summary of the results
 
-        self.setup_small_scan()
+        self.setup_default_scan()
         self.setup_default_surveys()
 
     def setup_demo_scan(self, wd_lens=True):
@@ -41,22 +41,22 @@ class Grid:
             with a single (irrelevant) temperature and larger
             masses and mass steps.
         """
-        self.star_masses = np.arange(0.2, 1.3, 0.5)
-        self.star_temperatures = np.array([5000, 10000])
+        self.star_masses = [0.3, 0.6, 0.9, 1.2]
+        self.star_temperatures = np.array([5000, 10000, 20000])
 
         if wd_lens:
-            self.lens_masses = np.arange(0.2, 1.3, 0.5)
-            self.lens_temperatures = np.array([5000, 10000])
+            self.lens_masses = self.star_masses
+            self.lens_temperatures = self.star_temperatures
         else:
             self.lens_masses = np.arange(1.0, 30, 3)
-            self.lens_temperatures = np.array([5000])
+            self.lens_temperatures = np.array([0])
 
-        self.semimajor_axes = np.geomspace(1e-3, 10, 30)
-        self.declinations = np.linspace(0, 90, 10000)
+        self.semimajor_axes = np.geomspace(1e-3, 10, 100)
+        self.declinations = np.linspace(0, 5, 251)
 
         print(f'Total number of parameters (excluding dec): {self.get_num_parameters()}')
 
-    def setup_small_scan(self, wd_lens=True):
+    def setup_default_scan(self, wd_lens=True):
         """
         Make a small parameter set,
         with low resolution on most parameters.
@@ -70,18 +70,19 @@ class Grid:
             masses and mass steps.
         """
 
-        self.star_masses = np.round(np.arange(0.2, 1.2, 0.2), 2)
-        self.star_temperatures = np.arange(5000, 30000, 5000)
+        self.star_masses = np.round(np.arange(0.2, 1.5, 0.1), 2)
+        self.star_temperatures = np.arange(2500, 37500, 2500)
 
         if wd_lens:
-            self.lens_masses = np.round(np.arange(0.2, 1.2, 0.2), 2)
-            self.lens_temperatures = np.arange(5000, 30000, 5000)
+            self.lens_masses = self.star_masses
+            self.lens_temperatures = self.star_temperatures
         else:
             self.lens_masses = np.round(np.arange(1.5, 30, 0.5), 2)
-            self.lens_temperatures = np.array([5000])
+            self.lens_temperatures = np.array([0])
 
         self.semimajor_axes = np.geomspace(1e-3, 10, 100)
-        self.declinations = np.linspace(0, 90, 90001)
+        # self.declinations = np.linspace(0, 90, 90001)
+        self.declinations = np.linspace(0, 5, 1001)
 
         print(f'Total number of parameters (excluding dec): {self.get_num_parameters()}')
 
@@ -173,7 +174,10 @@ class Grid:
         lens_masses = []
         smas = []
         decs = []
-        for s in self.systems:
+
+        print(f'Summarizing {len(self.systems)} systems.')
+
+        for i, s in enumerate(self.systems):
             star_temps.append(s.star_temp)
             star_masses.append(s.star_mass)
             lens_temps.append(s.lens_temp)
@@ -303,6 +307,9 @@ class Grid:
         self.dataset = ds
 
         # second pass on the data:
+        t0 = timer()
+        div = 10 ** int(np.log10(len(self.systems)) - 1)
+
         for i, s in enumerate(self.systems):
             indexer = {k: getattr(s, k) for k in coord_names}
             ds.system_index.loc[indexer] = i
@@ -323,15 +330,24 @@ class Grid:
                     ds.total_detections.loc[indexer] = max(s.total_detections[sur])
                     ds.effective_volume.loc[indexer] = s.effective_volumes[sur]
 
+            if i > 0 and i % div == 0:
+                current_time = timer() - t0
+                total_time = current_time / i * len(self.systems)
+                print(f'count= {i:10d} / {len(self.systems)} | '
+                      f'time= {current_time:.1f} / {total_time:.1f}s')
+
         print(f'Time to convert results to dataset: {timer() - t0:.1f}s')
 
-    def effective_volume_marginal_dec(self):
+    def marginalize_declinations(self):
         if self.dataset is None:
             raise ValueError('Must have a dataset first!')
         ds = self.dataset
         dec = ds.declination * np.pi / 180
         dec_step = dec[1] - dec[0]  # do something more complicated if uneven steps
         new_ev = (ds.effective_volume * np.cos(dec) * dec_step).sum(dim='declination')
+        new_ev.attrs['name'] = 'effective_volume'
+        new_ev.attrs['long_name'] = 'Effective volume'
+        new_ev.attrs['units'] = 'pc^3'
         return new_ev
 
     def get_probability_model(self, sma_dist=0, lens_mass_dist=0, star_mass_dist=0, lens_temp_dist=0, star_temp_dist=0):
@@ -441,11 +457,10 @@ class Grid:
         if 'probability_model' not in self.dataset:
             raise KeyError('Need to first calculate a probability model!')
 
-        eff = self.effective_volume_marginal_dec()
+        eff = self.marginalize_declinations()
         prob = self.dataset.probability_model
 
         return (eff * prob).sum()
-
 
     def total_detections(self, priors=None):
         """
@@ -486,11 +501,9 @@ class Grid:
         """
 
 
-
-
 if __name__ == "__main__":
     g = Grid()
-    # g.setup_demo_scan()
+    g.setup_demo_scan()
     g.run_simulation()
     g.summarize()
     g.get_probability_model()

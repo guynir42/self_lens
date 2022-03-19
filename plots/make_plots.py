@@ -58,7 +58,7 @@ colors = prop_cycle.by_key()['color']
 # for WD lenses
 masses = np.array([0.3, 0.6, 1.0, 1.2])
 styles = ['*', 'v', 's', 'p']
-orbits = np.geomspace(0.0001, 1, 60)
+orbits = np.geomspace(0.0001, 1, 120)
 peak_mags = np.zeros((len(masses), len(orbits)))
 source_sizes = np.zeros(peak_mags.shape)
 periods = np.zeros(peak_mags.shape)
@@ -97,6 +97,7 @@ for i, m in enumerate(masses):
     ax.plot(periods[i, idx], peak_mags[i, idx], 'bo', fillstyle='none', markersize=12)
 
 # NS and BH lenses
+orbits = np.geomspace(0.0001, 1, 60)
 masses = np.array([1.5, 3, 10.0, 30.0])
 colors = [np.ones(3) * c for c in [0.6, 0.4, 0.2, 0.0]]
 styles = ['X', 'D', 'o', '^']

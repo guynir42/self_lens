@@ -249,7 +249,7 @@ class Survey:
             # the probability to find at least one flare per system (cannot exceed 1)
             system.total_prob[self.name] = 1 - (1 - mean_prob) ** self.num_visits
 
-            # average number of detections over many visits can exceed 1
+            # average number of detections over many visits (can exceed 1)
             system.total_detections[self.name] = num_detections * self.num_visits
 
             # if total_detections is large, can accumulate more effective volume than volume

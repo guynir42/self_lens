@@ -861,8 +861,8 @@ class System:
         flux1 *= (self.star_size * sun_radius) ** 2 / (10 * pc) ** 2  # erg/s/cm^2
 
         if self.lens_flux > 0 and self.lens_temp > 0:
-            flux2 = integ.quad(self.black_body, filter_low_f, filter_high_f, args=(self.star_temp, True))[0]
-            flux2 *= (self.star_size * sun_radius) ** 2 / (10 * pc) ** 2  # erg/s/cm^2
+            flux2 = integ.quad(self.black_body, filter_low_f, filter_high_f, args=(self.lens_temp, True))[0]
+            flux2 *= (self.lens_size * sun_radius) ** 2 / (10 * pc) ** 2  # erg/s/cm^2
         else:
             flux2 = 0
 
@@ -906,6 +906,41 @@ class System:
             pass
 
         return mag
+
+    @staticmethod
+    def scale_with_temperature(temp1, temp2, wavelength, bandwidth):
+        """
+        Calculate the expected scaling up of the total effective volume
+        that happens when the temperature is changed from temp1 to temp2.
+        Takes into account the increased flux inside the filter, and scales
+        each distance by an amount that reflects the change in brightness.
+        The scaling of distance is then translated to scaling of volume.
+
+        :param temp1: scalar float
+            current temperature of the dominant body in the system.
+        :param temp2: scalar float
+            new temperature of the dominant body (assume the second body
+            either stays sub-dominant or otherwise has similar temperature
+            to the dominant one, before and after the transformation).
+        :param wavelength: scalar float
+            central wavelength of filter passband (in nm).
+        :param bandwidth: scalar float
+            width of the filter passband (in nm).
+        :return: scalar float
+            scaling factor of the effective volume.
+        """
+        c_nm = 2.99792458e17  # speed of light in nm/s
+        filt_bounds = (wavelength - bandwidth / 2, wavelength + bandwidth / 2)
+        filter_low_f = c_nm / max(filt_bounds)
+        filter_high_f = c_nm / min(filt_bounds)
+        flux1 = integ.quad(System.black_body, filter_low_f, filter_high_f, args=(temp1, True))[0]
+        flux2 = integ.quad(System.black_body, filter_low_f, filter_high_f, args=(temp2, True))[0]
+
+        distance_ratio = np.sqrt(flux2 / flux1)
+
+        volume_ratio = distance_ratio ** 3
+
+        return volume_ratio
 
     @staticmethod
     def black_body(f, temp, photons=False):
@@ -1231,6 +1266,7 @@ class System:
                 new_str.append(f'eff. vol: {self.effective_volumes[s]:.2g} pc^3')
                 print(' | '.join(new_str))
 
+
 # to be deprecated:
 def find_lambda_range(temp):
     """
@@ -1248,6 +1284,7 @@ def find_lambda_range(temp):
     la1 = best_la/10
     la2 = best_la*10
     return la1, la2
+
 
 # to be deprecated:
 def black_body(la, temp, photons=False):  # black body radiation
