@@ -70,8 +70,8 @@ class Grid:
             masses and mass steps.
         """
 
-        self.star_masses = np.round(np.arange(0.2, 1.5, 0.1), 2)
-        self.star_temperatures = np.arange(2500, 37500, 2500)
+        self.star_masses = np.round(np.arange(0.2, 1.5, 0.2), 2)
+        self.star_temperatures = np.arange(5000, 35000, 5000)
 
         if wd_lens:
             self.lens_masses = self.star_masses
@@ -97,7 +97,12 @@ class Grid:
         Make a short list of several surveys that are commonly used in the analysis.
         """
 
-        self.surveys = [survey.Survey('ZTF'), survey.Survey('CURIOS')]
+        self.surveys = [
+            survey.Survey('ZTF'),
+            survey.Survey('LSST'),
+            survey.Survey('TESS'),
+            survey.Survey('CURIOS'),
+        ]
 
     def run_simulation(self, **kwargs):
         """
@@ -157,7 +162,9 @@ class Grid:
                             if count > 0 and count % div == 0:
                                 current_time = timer() - t0
                                 total_time = current_time / count * num
-                                print(f'count= {count:10d} / {num} | time= {current_time:.1f} / {total_time:.1f}s')
+                                print(f'count= {count:10d} / {num} | '
+                                      f'time= {self.human_readable_time(current_time)} / '
+                                      f'{self.human_readable_time(total_time)}')
 
         print(f'Successfully generated {len(self.systems)} systems in {timer() - t0:.1f}s.')
 
@@ -500,10 +507,16 @@ class Grid:
             Need to think about this...
         """
 
+    @staticmethod
+    def human_readable_time(time_seconds):
+        hours, rem = divmod(time_seconds, 3600)
+        minutes, seconds = divmod(rem, 60)
+        return f'{int(hours):02d}:{int(minutes):02d}:{seconds:.1f}'
+
 
 if __name__ == "__main__":
     g = Grid()
-    g.setup_demo_scan()
+    # g.setup_demo_scan()
     g.run_simulation()
     g.summarize()
     g.get_probability_model()

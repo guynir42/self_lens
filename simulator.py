@@ -1171,7 +1171,7 @@ class System:
     def print(self, pars=None, surveys=None):
 
         par_dict = {
-            'inclination': ('i', 'deg'),
+            'inclination': ('i', ''),
             'einstein_radius': ('R_E', 'Rsun'),
             'lens_mass': ('M_l', 'Msun'),
             'lens_temp': ('T_l', 'K'),
@@ -1182,7 +1182,7 @@ class System:
             'star_size': ('R_s', 'Rsun'),
             'star_type': ('source', ''),
             'semimajor_axis': ('a', 'AU'),
-            'orbital_period': ('P', 'h'),
+            'orbital_period': ('P', ''),
             'roche_lobe': ('Roche', 'Rsun'),
             'source_size': ('R_source', 'R_E'),
             'occulter_size': ('R_occulter', 'R_E'),
@@ -1207,24 +1207,24 @@ class System:
                 new_str = []
                 for p in p_list:
                     if p == 'orbital_period':
-                        new_str.append(self.period_string())
+                        value = self.period_string()
                     elif p == 'inclination':
                         if self.inclination < 90:
-                            new_str.append(f'90 - {90 - self.inclination:.2g} deg')
+                            value = f'90 - {90 - self.inclination:.2g} deg'
                         else:
-                            new_str.append('90 deg')
+                            value = '90 deg'
                     else:
                         value = getattr(self, p)
                         if isinstance(value, float) and value != 0:
                             value = f'{value:.2g}'
 
-                        if p in par_dict:
-                            if value and par_dict[p][1]:
-                                new_str.append(f'{par_dict[p][0]}: {value} {par_dict[p][1]}')
-                            else:
-                                new_str.append(f'{par_dict[p][0]}: {value}')
+                    if p in par_dict:
+                        if value and par_dict[p][1]:
+                            new_str.append(f'{par_dict[p][0]}: {value} {par_dict[p][1]}')
                         else:
-                            new_str.append(f'{p}: {value}')
+                            new_str.append(f'{par_dict[p][0]}: {value}')
+                    else:
+                        new_str.append(f'{p}: {value}')
                 print(' | '.join(new_str))
 
         if surveys is None:
@@ -1353,7 +1353,7 @@ def default_filter(filter_name):
         'R': (658, 138),
         'I': (806, 149),
         'F500W': (500, 200),
-        'white': (550, 300),
+        'WHITE': (550, 300),
     }
     # TODO: make sure these numbers are correct!
 

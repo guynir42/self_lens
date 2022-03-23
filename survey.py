@@ -50,7 +50,7 @@ class Survey:
         self.slew_time = kwargs.get('slew_time', 0)  # time (in seconds) it takes to slew to new field at end of visit
         self.duty_cycle = kwargs.get('duty_cycle')  # fraction on-sky, excluding dead time, daylight, weather
         self.footprint = kwargs.get('footprint')  # what fraction of the sky is surveyed (typically 0.5 or 1)
-        self.duration = 1  # years (setting default 1 is to compare the number of detections per year)
+        self.duration = kwargs.get('duration', 1)  # years (setting default 1 to get detections per year)
 
         # filters and image depths
         self.limmag = kwargs.get('limmag')  # objects fainter than this would not be seen at all  (faintest magnitude)
@@ -99,7 +99,7 @@ class Survey:
             self.num_fields = int(np.round(self.cadence * 24 * 3600 * self.duty_cycle / visit_time))
             self.num_visits = int(np.round(self.duration * 365.25 / self.cadence))
 
-        # in case we know the cadence and want to figure out the series length
+        # in case we know the cadence and want to figure out the series length (e.g., for CURIOS)
         elif self.num_visits is None and self.num_fields is None and self.series_length is None:
             # validate that we have all the needed information
             for arg in ['footprint', 'duration', 'duty_cycle', 'cadence',
@@ -499,15 +499,17 @@ def setup_default_survey(name, kwargs):
             'longitude': None,
             'latitude': None,
             'elevation': None,
+            'duration': 3,
         },
         'LSST': {
             'name': 'LSST',
             'telescope': 'Vera Rubin 8.4m',
             'field_area': 10,
-            'num_visits': 1000,
+            # 'num_visits': 1000,
             'exposure_time': 15,
             'series_length': 2,
-            'filter': 'r',
+            'dead_time': 2,
+            'filter': 'g',
             'limmag': 24.5,
             'precision': 0.01,
 
@@ -518,6 +520,7 @@ def setup_default_survey(name, kwargs):
             'longitude': None,
             'latitude': None,
             'elevation': None,
+            'duration': 10,
         },
         'CURIOS': {
             'name': 'CuRIOS',
@@ -536,6 +539,23 @@ def setup_default_survey(name, kwargs):
             'location': 'space',
             'longitude': None,
             'latitude': None,
+            'duration': 2,
+        },
+        'TESS': {
+            'name': 'TESS',
+            'telescope': 'TESS',
+            'field_area': 2300,
+            'exposure_time': 30*60,
+            'cadence': 365.25,  # two visits per two year
+            'series_length': 13 * 24 * 60 / 30,  # 13 days, in 30min exposures
+            'dead_time': 0,
+            'filter': 'white',
+            'duty_cycle': 1.0,
+            'location': 'space',
+            'precision': 0.01,
+            'limmag': 15,
+            'footprint': 1,  # entire sky
+            'duration': 4,
         }
     }
 
@@ -566,39 +586,30 @@ if __name__ == "__main__":
 
     # sim.syst.plot()
 
-    ztf = Survey('ztf')
-    ztf.print()
-    print()
-    ztf.apply_detection_statistics(sim.syst)
+    tess = Survey('TESS')
+    tess.print()
+    tess.apply_detection_statistics(sim.syst)
+    sim.syst.print(surveys=['TESS'])
 
-    # name = "ZTF"
-    # if len(sim.syst.flare_prob[name]):
-    #     print(f'flare prob= {np.max(sim.syst.flare_prob[name]):.2e} | '
-    #           f'visit prob= {np.max(sim.syst.visit_prob[name]):.2e} | '
-    #           f'visit det= {np.max(sim.syst.visit_detections[name]):.2e} | '
-    #           f'total det= {np.max(sim.syst.total_detections[name]):.2e} | '
-    #           f'max dist= {max(sim.syst.distances[name]):.2f} pc | '
-    #           f'volume: {np.sum(sim.syst.total_volumes[name]):.2e} pc^3 | '
-    #           f'effective vol.= {sim.syst.effective_volumes[name]:.2e} pc^3')
-    # else:
-    #     print('Object is too faint to observe.')
+    # lsst = Survey('LSST')
+    # lsst.print()
+    # lsst.apply_detection_statistics(sim.syst)
+    # sim.syst.print(surveys=['LSST'])
 
-    cu = Survey('curios')
+    # print()
+    #
+    # ztf = Survey('ztf')
+    # ztf.print()
+    # print()
+    # ztf.apply_detection_statistics(sim.syst)
+    # sim.syst.print(surveys=['ZTF'])
+    #
+    # cu = Survey('curios')
+    #
+    # cu.print()
+    # print()
+    #
+    # cu.apply_detection_statistics(sim.syst)
+    # sim.syst.print(surveys=['CURIOS'])
 
-    cu.print()
-    print()
-
-    cu.apply_detection_statistics(sim.syst)
-    sim.syst.print(surveys=['CURIOS'])
-    # name = 'CURIOS'
-    # if len(sim.syst.flare_prob[name]):
-    #     print(f'flare prob= {np.max(sim.syst.flare_prob[name]):.2e} | '
-    #           f'visit prob= {np.max(sim.syst.visit_prob[name]):.2e} | '
-    #           f'visit det= {np.max(sim.syst.visit_detections[name]):.2e} | '
-    #           f'total det= {np.max(sim.syst.total_detections[name]):.2e} | '
-    #           f'max dist= {max(sim.syst.distances[name]):.2f} pc | '
-    #           f'volume: {np.sum(sim.syst.total_volumes[name]):.2e} pc^3 | '
-    #           f'effective vol.= {sim.syst.effective_volumes[name]:.2e} pc^3')
-    # else:
-    #     print('Object is too faint to observe.')
 
