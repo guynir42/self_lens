@@ -760,6 +760,7 @@ class System:
         self.source_size = None  # in units of Einstein radii
         self.occulter_size = None  # in units of Einstein radii
         self.impact_parameter = None  # in units of Einstein radii
+        self.fwhm = None  # the width of the peak (not specific to any survey)
         self.timestamps = None  # for the lightcurve (units are given below, defaults to seconds)
         self._time_units = 'seconds'  # for the above-mentioned timestamps
         self.magnifications = None  # the measured lightcurve
@@ -1227,6 +1228,8 @@ class System:
                         new_str.append(f'{p}: {value}')
                 print(' | '.join(new_str))
 
+        print(f'flare peak: {max(self.magnifications)-1:.2g} | flare FWHM: {self.fwhm:.2g} s')
+
         if surveys is None:
             surveys = list(self.apparent_mags.keys())
 
@@ -1236,17 +1239,23 @@ class System:
 
         if isinstance(surveys, list):  # this fails if surveys is False
             for s in surveys:
-                print(f'Survey results for {s}:')
 
-                survey = next(sur for sur in self.surveys if sur.name == s)
+                survey = next((sur for sur in self.surveys if sur.name == s), None)
+
+                if survey is None or len(self.flare_durations[s]) == 0:
+                    continue
+
+                print()
+                print(f'Survey results for {s}:')
 
                 series_time = survey.series_length * (survey.exposure_time + survey.dead_time)
 
                 new_str = []
                 t_flare = max(self.flare_durations[s])
                 new_str.append(f'flare duration: {t_flare:.2g} s')
-                new_str.append(f'duty cycle: {t_flare / self.orbital_period / 3600:.2g}')
                 new_str.append(f'period: {self.period_string()}')
+                new_str.append(f'duty cycle: {t_flare / self.orbital_period / 3600:.2g}')
+                new_str.append(f'exp time: {survey.exposure_time}')
                 new_str.append(f'series time: {series_time:.2g} s')
                 print(' | '.join(new_str))
 
@@ -1254,8 +1263,8 @@ class System:
                 new_str.append(f'flare prob: {max(self.flare_prob[s]):.2g}')
                 visit_prob = max(self.visit_prob[s])
                 new_str.append(f'visit prob: {visit_prob:.2g}')
-                if visit_prob != max(self.visit_detections[s]):
-                    new_str.append(f'visit det: {max(self.visit_detections[s]):.2g}')
+                # if visit_prob != max(self.visit_detections[s]):
+                new_str.append(f'visit det: {max(self.visit_detections[s]):.2g}')
                 new_str.append(f'total det: {max(self.total_detections[s]):.2g}')
                 print(' | '.join(new_str))
 
@@ -1354,6 +1363,7 @@ def default_filter(filter_name):
         'I': (806, 149),
         'F500W': (500, 200),
         'WHITE': (550, 300),
+        'TESS': (825, 450)
     }
     # TODO: make sure these numbers are correct!
 

@@ -58,7 +58,7 @@ class Survey:
         self.threshold = 3  # need 3 sigma for a detection by default
         self.mag_list = kwargs.get('mag_list')  # list of magnitudes over which the survey is sensitive
         self.prec_list = kwargs.get('prec_list')  # list of photometric precision for each mag_list item
-        self.distances = kwargs.get('distances', np.geomspace(MIN_DIST_PC, 50000, 50, endpoint=True)[1:])
+        self.distances = kwargs.get('distances', np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:])
         self.filter = kwargs.get('filter', 'V')
         self.wavelength = None  # central wavelength (in nm)
         self.bandpass = None  # assume top-hat (in nm)
@@ -479,6 +479,18 @@ def setup_default_survey(name, kwargs):
                0.02347019, 0.03147624, 0.0440884,  0.06288794, 0.09019933,
                0.12347744, 0.15113318, 0.18553443]) * np.log(10) / 2.5
 
+    # this rough estimate using package "ztf_wd", module "make_plots.py" with function "choose_summaries"
+    # we assume these precision values go together with a 7.5 sigma cut
+    # and even then we get tens of thousands of candidates at faint magnitudes
+    ztf_rms = np.array([0.11, 0.11, 0.11, 0.11, 0.11, 0.15, 0.15, 0.15, 0.17,
+                        0.17, 0.23, 0.3, 0.47, 0.75, 1.1, 1.7, 2.5, 3.7]) / 7.5
+
+    # this comes from the TESS references, but it seems really too optimistic
+    tess_mag_rough = np.array(list(range(6, 11)) + [15])
+    tess_rms_rough = np.array([26, 30, 35, 50, 100, 450]) * 1e-6 * 3.6
+    tess_mag = np.arange(6, 15, 0.5)
+    tess_rms = np.interp(tess_mag, tess_mag_rough, tess_rms_rough)
+
     defaults = {
         'ZTF': {
             'name': 'ZTF',
@@ -492,6 +504,7 @@ def setup_default_survey(name, kwargs):
             'limmag': 20.5,
             'prec_list': ztf_rms,
             'mag_list': ztf_mag,
+            'threshold': 7.5,
             # 'footprint': 0.5,
             'cadence': 1.5,
             'duty_cycle': 0.2,
@@ -509,6 +522,7 @@ def setup_default_survey(name, kwargs):
             'exposure_time': 15,
             'series_length': 2,
             'dead_time': 2,
+            'slew_time': 10,
             'filter': 'g',
             'limmag': 24.5,
             'precision': 0.01,
@@ -545,15 +559,17 @@ def setup_default_survey(name, kwargs):
             'name': 'TESS',
             'telescope': 'TESS',
             'field_area': 2300,
-            'exposure_time': 30*60,
-            'cadence': 365.25,  # two visits per two year
-            'series_length': 13 * 24 * 60 / 30,  # 13 days, in 30min exposures
+            'exposure_time': 30 * 60,
+            'cadence': 2 * 365.25,  # visit per two year
+            'series_length': 27 * 24 * 60 / 30,  # 27 days, in 30min exposures
             'dead_time': 0,
-            'filter': 'white',
+            'filter': 'TESS',
             'duty_cycle': 1.0,
             'location': 'space',
             'precision': 0.01,
             'limmag': 15,
+            'prec_list': tess_rms,
+            'mag_list': tess_mag,
             'footprint': 1,  # entire sky
             'duration': 4,
         }
@@ -579,9 +595,9 @@ if __name__ == "__main__":
     sim.calculate(
         lens_mass=1.5,
         star_mass=0.6,
-        star_temp=7000,
+        star_temp=10000,
         declination=0.001,
-        semimajor_axis=0.0005,
+        semimajor_axis=0.001,
     )
 
     # sim.syst.plot()
@@ -589,21 +605,21 @@ if __name__ == "__main__":
     tess = Survey('TESS')
     tess.print()
     tess.apply_detection_statistics(sim.syst)
-    sim.syst.print(surveys=['TESS'])
+    # sim.syst.print(surveys=['TESS'])
 
-    # lsst = Survey('LSST')
-    # lsst.print()
-    # lsst.apply_detection_statistics(sim.syst)
+    print()
+    ztf = Survey('ztf')
+    ztf.print()
+    ztf.apply_detection_statistics(sim.syst)
+    # sim.syst.print(surveys=['ZTF'])
+
+    print()
+    lsst = Survey('LSST')
+    lsst.print()
+    lsst.apply_detection_statistics(sim.syst)
     # sim.syst.print(surveys=['LSST'])
 
-    # print()
-    #
-    # ztf = Survey('ztf')
-    # ztf.print()
-    # print()
-    # ztf.apply_detection_statistics(sim.syst)
-    # sim.syst.print(surveys=['ZTF'])
-    #
+
     # cu = Survey('curios')
     #
     # cu.print()
@@ -611,5 +627,6 @@ if __name__ == "__main__":
     #
     # cu.apply_detection_statistics(sim.syst)
     # sim.syst.print(surveys=['CURIOS'])
-
-
+    print()
+    print('System overview:')
+    sim.syst.print()
