@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from timeit import default_timer as timer
+import psutil
+from collections import defaultdict
 
 import xarray as xr
 
@@ -28,6 +30,8 @@ class Grid:
         self.setup_default_scan()
         self.setup_default_surveys()
 
+        self.timing = None
+
     def setup_demo_scan(self, wd_lens=True):
         """
         Make a very small parameter set,
@@ -42,19 +46,22 @@ class Grid:
             masses and mass steps.
         """
         self.star_masses = [0.3, 0.6, 0.9, 1.2]
-        self.star_temperatures = np.array([5000, 10000, 20000])
+        self.star_masses = [0.6]
+        self.star_temperatures = [5000, 10000, 20000]
+        self.star_temperatures = [10000]
 
         if wd_lens:
             self.lens_masses = self.star_masses
             self.lens_temperatures = self.star_temperatures
         else:
             self.lens_masses = np.arange(1.0, 30, 3)
-            self.lens_temperatures = np.array([0])
+            self.lens_temperatures = [0]
 
         self.semimajor_axes = np.geomspace(1e-3, 10, 100)
-        self.declinations = np.linspace(0, 5, 251)
+        self.declinations = np.linspace(0, 0.25, 251)
+        # self.declinations = np.geomspace(1e-5, 5, 100)
 
-        print(f'Total number of parameters (excluding dec): {self.get_num_parameters()}')
+        print(f'Total number of parameters: {self.get_num_parameters()}')
 
     def setup_default_scan(self, wd_lens=True):
         """
@@ -71,7 +78,8 @@ class Grid:
         """
 
         self.star_masses = np.round(np.arange(0.2, 1.5, 0.2), 2)
-        self.star_temperatures = np.arange(5000, 35000, 5000)
+        # self.star_temperatures = np.arange(5000, 35000, 5000)
+        self.star_temperatures = np.array([5000, 10000, 20000, 30000])
 
         if wd_lens:
             self.lens_masses = self.star_masses
@@ -82,15 +90,10 @@ class Grid:
 
         self.semimajor_axes = np.geomspace(1e-3, 10, 100)
         # self.declinations = np.linspace(0, 90, 90001)
-        self.declinations = np.linspace(0, 5, 1001)
+        self.declinations = np.linspace(0, 0.25, 101)
+        # self.declinations = np.geomspace(1e-5, 5, 10000)
 
-        print(f'Total number of parameters (excluding dec): {self.get_num_parameters()}')
-
-    def get_num_parameters(self):
-        num_pars = len(self.star_masses) * len(self.star_temperatures)
-        num_pars *= len(self.lens_masses) * len(self.lens_temperatures)
-        num_pars *= len(self.semimajor_axes)
-        return num_pars
+        print(f'Total number of parameters: {self.get_num_parameters()}')
 
     def setup_default_surveys(self):
         """
@@ -102,9 +105,25 @@ class Grid:
             survey.Survey('LSST'),
             survey.Survey('TESS'),
             survey.Survey('CURIOS'),
+            # survey.Survey('LAST'),
         ]
 
-    def run_simulation(self, **kwargs):
+    def get_num_parameters(self):
+        num_pars = len(self.star_masses) * len(self.star_temperatures)
+        num_pars *= len(self.lens_masses) * len(self.lens_temperatures)
+        num_pars *= len(self.semimajor_axes) * len(self.declinations)
+        return num_pars
+
+    def memory_size(self):
+
+        coord_size = self.get_num_parameters()
+        num_arrays = 11
+        num_small_arrays = 3
+        total_size_bytes = (num_arrays * len(self.surveys) + num_small_arrays) * coord_size * 8
+
+        return total_size_bytes / 1024 ** 3  # return GBs
+
+    def run_simulation(self, keep_systems=False, **kwargs):
         """
         Apply the probability estimates from
         self.surveys to all the systems in the parameter grid.
@@ -115,104 +134,29 @@ class Grid:
             ...
 
         """
+        self.timing = defaultdict(float)
         self.systems = []
-        num = self.get_num_parameters()
+        num = int(self.get_num_parameters() / len(self.declinations))
         div = 10 ** int(np.log10(num)-1)
 
-        print(f'Running a grid with {len(self.surveys)} surveys and {num} parameters (not including dec.). ')
-        t0 = timer()
-        count = 0
-        for lt, lens_temp in enumerate(self.lens_temperatures):
-            for st, star_temp in enumerate(self.star_temperatures):
-                for ml, lens_mass in enumerate(self.lens_masses):
-                    for ms, star_mass in enumerate(self.star_masses):
-                        for a, sma in enumerate(self.semimajor_axes):
-                            for d, dec in enumerate(self.declinations):
-                                try:
-                                    self.simulator.timestamps = None
-                                    self.simulator.calculate(lens_temp=lens_temp,
-                                                             lens_mass=lens_mass,
-                                                             star_temp=star_temp,
-                                                             star_mass=star_mass,
-                                                             semimajor_axis=sma,
-                                                             declination=dec)
-                                except ValueError as e:
-                                    if 'requested occulter radius' in str(e):
-                                        continue  # very large occulters generally don't make a flare
-                                    else:
-                                        raise e
+        # build data structures to contain the results
+        memory_gb = self.memory_size()
+        print(f'Memory footprint of array is {memory_gb:.2f} GB')
 
-                                flare_probs = []
-                                for s in self.surveys:
-                                    try:
-                                        s.apply_detection_statistics(self.simulator.syst)
-                                    except Exception as e:
-                                        print(e)
-                                    if len(self.simulator.syst.flare_prob[s.name]):
-                                        flare_probs.append(max(self.simulator.syst.flare_prob[s.name]))
-
-                                if len(flare_probs) == 0 or np.all(np.array(flare_probs) == 0):
-                                    break  # don't keep scanning declinations after all surveys can't detect anything
-                                self.simulator.syst.magnifications = None
-                                self.simulator.syst.timestamps = None
-                                self.systems.append(self.simulator.syst)  # add this system to the list
-
-                            # count = len(self.systems)
-                            count += 1  # number of parameters already covered, not including declination
-                            if count > 0 and count % div == 0:
-                                current_time = timer() - t0
-                                total_time = current_time / count * num
-                                print(f'count= {count:10d} / {num} | '
-                                      f'time= {self.human_readable_time(current_time)} / '
-                                      f'{self.human_readable_time(total_time)}')
-
-        print(f'Successfully generated {len(self.systems)} systems in {timer() - t0:.1f}s.')
-
-    def summarize(self):
-        """
-        Put the results of the simulation into an xarray dataset.
-        """
-
-        t0 = timer()
-        # first pass of the data:
-        star_temps = []
-        star_masses = []
-        lens_temps = []
-        lens_masses = []
-        smas = []
-        decs = []
-
-        print(f'Summarizing {len(self.systems)} systems.')
-
-        for i, s in enumerate(self.systems):
-            star_temps.append(s.star_temp)
-            star_masses.append(s.star_mass)
-            lens_temps.append(s.lens_temp)
-            lens_masses.append(s.lens_mass)
-            smas.append(s.semimajor_axis)
-            decs.append(s.declination)
-
-        star_temps = np.unique(star_temps)
-        star_masses = np.unique(star_masses)
-        lens_temps = np.unique(lens_temps)
-        lens_masses = np.unique(lens_masses)
-        smas = np.unique(smas)
-        decs = np.unique(decs)
+        if memory_gb > psutil.virtual_memory().available / 1024 ** 3:
+            raise MemoryError(f'Array size required ({memory_gb:.2f} GB) exceeds available memory')
 
         coords = {
-            'lens_temp': lens_temps,
-            'star_temp': star_temps,
-            'lens_mass': lens_masses,
-            'star_mass': star_masses,
-            'semimajor_axis': smas,
-            'declination': decs,
+            'lens_temp': self.lens_temperatures,
+            'star_temp': self.star_temperatures,
+            'lens_mass': self.lens_masses,
+            'star_mass': self.star_masses,
+            'semimajor_axis': self.semimajor_axes,
+            'declination': self.declinations,
         }
         survey_names = [s.name for s in self.surveys]
         coord_names = list(coords.keys())
         coord_lengths = tuple(len(v) for v in coords.values())
-
-        coords['survey'] = survey_names  # add another coordinate to keep track of different survey's results
-
         nan_array = np.empty(coord_lengths)
         nan_array[:] = np.nan
         zeros_array = np.zeros(coord_lengths + (len(self.surveys),))
@@ -220,6 +164,7 @@ class Grid:
         data_vars = {
             'system_index': (coord_names, nan_array.copy()),
             'orbital_period': (coord_names, nan_array.copy()),
+            'peak_magnification': (coord_names, nan_array.copy()),
             'distance': (coord_names + ['survey'], zeros_array.copy()),
             'volume': (coord_names + ['survey'], zeros_array.copy()),
             'total_volume': (coord_names + ['survey'], zeros_array.copy()),
@@ -232,6 +177,131 @@ class Grid:
             'total_detections': (coord_names + ['survey'], zeros_array.copy()),
             'effective_volume': (coord_names + ['survey'], zeros_array.copy()),
         }
+
+        # add the survey coordinate as well
+        coords['survey'] = survey_names
+
+        print(f'Running a grid with {len(self.surveys)} surveys and {num} parameters (not including dec.). ')
+        t0 = timer()
+        count = 0
+        for lt, lens_temp in enumerate(self.lens_temperatures):
+            for st, star_temp in enumerate(self.star_temperatures):
+                for ml, lens_mass in enumerate(self.lens_masses):
+                    for ms, star_mass in enumerate(self.star_masses):
+                        for a, sma in enumerate(self.semimajor_axes):
+                            for d, dec in enumerate(self.declinations):
+                                try:
+                                    t1 = timer()
+                                    self.simulator.timestamps = None
+                                    self.simulator.calculate(lens_temp=lens_temp,
+                                                             lens_mass=lens_mass,
+                                                             star_temp=star_temp,
+                                                             star_mass=star_mass,
+                                                             semimajor_axis=sma,
+                                                             declination=dec)
+                                    self.timing['make lcs'] += timer() - t1
+                                except ValueError as e:
+                                    if 'requested occulter radius' in str(e):
+                                        continue  # very large occulters generally don't make a flare
+                                    else:
+                                        raise e
+
+                                t1 = timer()
+                                flare_probs = []
+                                for survey in self.surveys:
+                                    try:
+                                        survey.apply_detection_statistics(self.simulator.syst)
+                                    except Exception as e:
+                                        print(e)
+                                    if len(self.simulator.syst.flare_prob[survey.name]):
+                                        flare_probs.append(max(self.simulator.syst.flare_prob[survey.name]))
+                                self.timing['apply stats'] += timer() - t1
+
+                                if len(flare_probs) == 0 or np.all(np.array(flare_probs) == 0):
+                                    break  # don't keep scanning declinations after all surveys can't detect anything
+
+                                t1 = timer()
+                                s = self.simulator.syst  # shorthand
+                                data_vars['orbital_period'][1][lt, st, ml, ms, a, d] = s.orbital_period
+                                data_vars['peak_magnification'][1][lt, st, ml, ms, a, d] = max(s.magnifications)
+
+                                for i, sur in enumerate(survey_names):
+
+                                    if len(s.distances[sur]):  # if not, leave zeros for all
+                                        data_vars['distance'][1][lt, st, ml, ms, a, d, i] = max(s.distances[sur])
+                                        data_vars['volume'][1][lt, st, ml, ms, a, d, i] = np.sum(s.volumes[sur])
+                                        data_vars['total_volume'][1][lt, st, ml, ms, a, d, i] = np.sum(s.total_volumes[sur])
+                                        data_vars['flare_duration'][1][lt, st, ml, ms, a, d, i] = max(s.flare_durations[sur])
+                                        data_vars['flare_prob'][1][lt, st, ml, ms, a, d, i] = max(s.flare_prob[sur])
+                                        duty_cycle = max(s.flare_durations[sur]) / (s.orbital_period * 3600)
+                                        data_vars['duty_cycle'][1][lt, st, ml, ms, a, d, i] = duty_cycle
+                                        data_vars['visit_prob'][1][lt, st, ml, ms, a, d, i] = max(s.visit_prob[sur])
+                                        data_vars['total_prob'][1][lt, st, ml, ms, a, d, i] = max(s.total_prob[sur])
+                                        data_vars['visit_detections'][1][lt, st, ml, ms, a, d, i] = max(s.visit_detections[sur])
+                                        data_vars['total_detections'][1][lt, st, ml, ms, a, d, i] = max(s.total_detections[sur])
+                                        data_vars['effective_volume'][1][lt, st, ml, ms, a, d, i] = s.effective_volumes[sur]
+
+                                if keep_systems:
+                                    self.simulator.syst.magnifications = None
+                                    self.simulator.syst.timestamps = None
+                                    self.systems.append(self.simulator.syst)  # add this system to the list
+                                self.timing['store data'] += timer() - t1
+
+                            count += 1  # number of parameters already covered, not including declination
+                            if count > 0 and count % div == 0:
+                                current_time = timer() - t0
+                                total_time = current_time / count * num
+                                print(f'count= {count:10d} / {num} | '
+                                      f'time= {self.human_readable_time(current_time)} / '
+                                      f'{self.human_readable_time(total_time)}')
+
+        print(f'Successfully generated {count} systems in {timer() - t0:.1f}s.')
+        self.make_xarray(coords, data_vars)
+
+    def make_xarray(self, coords, data_vars):
+        """
+        Setup an xarray holding the simulation results
+
+        :param coords:
+            coordinates dictionary
+        :param data_vars:
+            data variables dictionary
+        """
+
+        # coords = {
+        #     'lens_temp': self.lens_temperatures,
+        #     'star_temp': self.star_temperatures,
+        #     'lens_mass': self.lens_masses,
+        #     'star_mass': self.star_masses,
+        #     'semimajor_axis': self.semimajor_axes,
+        #     'declination': self.declinations,
+        # }
+        # survey_names = [s.name for s in self.surveys]
+        # coord_names = list(coords.keys())
+        # coord_lengths = tuple(len(v) for v in coords.values())
+        #
+        # coords['survey'] = survey_names  # add another coordinate to keep track of different survey's results
+        #
+        # nan_array = np.empty(coord_lengths)
+        # nan_array[:] = np.nan
+        # zeros_array = np.zeros(coord_lengths + (len(self.surveys),))
+        #
+        # data_vars = {
+        #     'system_index': (coord_names, nan_array.copy()),
+        #     'orbital_period': (coord_names, nan_array.copy()),
+        #     'peak_magnification': (coord_names, nan_array.copy()),
+        #     'distance': (coord_names + ['survey'], zeros_array.copy()),
+        #     'volume': (coord_names + ['survey'], zeros_array.copy()),
+        #     'total_volume': (coord_names + ['survey'], zeros_array.copy()),
+        #     'flare_duration': (coord_names + ['survey'], zeros_array.copy()),
+        #     'flare_prob': (coord_names + ['survey'], zeros_array.copy()),
+        #     'duty_cycle': (coord_names + ['survey'], zeros_array.copy()),
+        #     'visit_prob': (coord_names + ['survey'], zeros_array.copy()),
+        #     'total_prob': (coord_names + ['survey'], zeros_array.copy()),
+        #     'visit_detections': (coord_names + ['survey'], zeros_array.copy()),
+        #     'total_detections': (coord_names + ['survey'], zeros_array.copy()),
+        #     'effective_volume': (coord_names + ['survey'], zeros_array.copy()),
+        # }
 
         ds = xr.Dataset(coords=coords, data_vars=data_vars)
 
@@ -252,6 +322,10 @@ class Grid:
             long_name='Orbital period',
             units='hours',
             doc='The orbital period of the system given its semimajor axis and masses.'
+        )
+        ds.peak_magnification.attrs = dict(
+            long_name='Peak magnification',
+            doc='The maximum flare magnification relative to the baseline flux.'
         )
         ds.distance.attrs = dict(
             long_name='Maximal visible distance',
@@ -312,38 +386,6 @@ class Grid:
         )
 
         self.dataset = ds
-
-        # second pass on the data:
-        t0 = timer()
-        div = 10 ** int(np.log10(len(self.systems)) - 1)
-
-        for i, s in enumerate(self.systems):
-            indexer = {k: getattr(s, k) for k in coord_names}
-            ds.system_index.loc[indexer] = i
-            ds.orbital_period.loc[indexer] = s.orbital_period
-
-            for sur in survey_names:
-                indexer['survey'] = sur
-                if len(s.distances[sur]):  # if not, leave zeros for all
-                    ds.distance.loc[indexer] = max(s.distances[sur])
-                    ds.volume.loc[indexer] = np.sum(s.volumes[sur])
-                    ds.total_volume.loc[indexer] = np.sum(s.total_volumes[sur])
-                    ds.flare_duration.loc[indexer] = max(s.flare_durations[sur])
-                    ds.flare_prob.loc[indexer] = max(s.flare_prob[sur])
-                    ds.duty_cycle.loc[indexer] = max(s.flare_durations[sur]) / (s.orbital_period * 3600)
-                    ds.visit_prob.loc[indexer] = max(s.visit_prob[sur])
-                    ds.total_prob.loc[indexer] = max(s.total_prob[sur])
-                    ds.visit_detections.loc[indexer] = max(s.visit_detections[sur])
-                    ds.total_detections.loc[indexer] = max(s.total_detections[sur])
-                    ds.effective_volume.loc[indexer] = s.effective_volumes[sur]
-
-            if i > 0 and i % div == 0:
-                current_time = timer() - t0
-                total_time = current_time / i * len(self.systems)
-                print(f'count= {i:10d} / {len(self.systems)} | '
-                      f'time= {current_time:.1f} / {total_time:.1f}s')
-
-        print(f'Time to convert results to dataset: {timer() - t0:.1f}s')
 
     def marginalize_declinations(self):
         if self.dataset is None:
@@ -518,9 +560,10 @@ if __name__ == "__main__":
     g = Grid()
     # g.setup_demo_scan()
     g.run_simulation()
-    g.summarize()
+    # g.summarize()
     g.get_probability_model()
     total_vol = float(g.get_total_volume())
     print(f'total volume: {total_vol:.1f}pc^3')
     # g.datset = xr.load_dataset('saved/grid_data.nc')
+    ev = g.marginalize_declinations()
 

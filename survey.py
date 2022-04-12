@@ -111,6 +111,19 @@ class Survey:
             self.num_fields = int(np.round(self.footprint * 4 * 180 ** 2 / np.pi / self.field_area))
             visit_time = self.cadence * 24 * 3600 * self.duty_cycle / self.num_fields
             self.series_length = int(np.round((visit_time - self.slew_time) / (self.exposure_time + self.dead_time)))
+
+        # # we know what part of the sky we want to cover but want the cadence to be set automatically
+        # elif self.cadence is None and self.num_fields is None and self.num_visits is None:
+        #     # validate that we have all the needed information
+        #     for arg in ['footprint', 'duration', 'duty_cycle', 'series_length',
+        #                 'exposure_time', 'slew_time', 'dead_time', 'field_area']:
+        #         if getattr(self, arg) is None:
+        #             raise ValueError(f'Cannot find number of fields/visits without {arg}')
+        #
+        #         visit_time = self.series_length * (self.exposure_time + self.dead_time) + self.slew_time
+        #         self.num_fields = int(np.ceil(self.footprint * (4 * 180 ** 2 / np.pi) / self.field_area))
+        #         self.num_visits = int(np.round(self.duration * 365.25 / self.cadence))
+
         else:
             raise ValueError('Illegal combination of values for this survey!')
 
@@ -236,9 +249,12 @@ class Survey:
         best_precision = prec[best_precision_idx]
         best_flare_time = flare_time_per_distance[best_precision_idx]
 
-        period = system.orbital_period * 3600  # shorthand
+        period = system.orbital_period * 3600  # convert to seconds
         if len(prec):  # only calculate probabilities for distances that have any chance of detection
+
+            t1 = timer()
             (peak_prob, mean_prob, num_detections) = self.calc_prob(lc, ts, prec, best_precision, best_flare_time, period)
+
             if self.exposure_time > period:  # this only applies to simple S/N case of diluted signal
                 pass  # TODO: figure out this case later
 
@@ -303,7 +319,7 @@ class Survey:
                            for each flare in the series).
 
         """
-
+        t1 = timer()
         t_exp = self.exposure_time
         t_dead = self.dead_time
         t_series = (t_exp + t_dead) * self.series_length
@@ -491,6 +507,26 @@ def setup_default_survey(name, kwargs):
     tess_mag = np.arange(6, 15, 0.5)
     tess_rms = np.interp(tess_mag, tess_mag_rough, tess_rms_rough)
 
+    last_mag_rms = [
+        (10.0, 0.005),
+        (10.5, 0.005),
+        (11.0, 0.006),
+        (11.5, 0.007),
+        (12.0, 0.008),
+        (12.5, 0.009),
+        (13.0, 0.010),
+        (13.5, 0.014),
+        (14.0, 0.020),
+        (14.5, 0.028),
+        (15.0, 0.040),
+        (15.5, 0.055),
+        (16.0, 0.077),
+        (16.5, 0.110),
+        (17.0, 0.152),
+        (17.5, 0.214),
+        (18.0, 0.300)
+    ]
+
     defaults = {
         'ZTF': {
             'name': 'ZTF',
@@ -507,12 +543,13 @@ def setup_default_survey(name, kwargs):
             'threshold': 7.5,
             # 'footprint': 0.5,
             'cadence': 1.5,
-            'duty_cycle': 0.2,
+            'duty_cycle': 0.25,
             'location': 'north',
             'longitude': None,
             'latitude': None,
             'elevation': None,
             'duration': 3,
+            'distances': np.geomspace(MIN_DIST_PC, 5000, 100, endpoint=True)[1:]
         },
         'LSST': {
             'name': 'LSST',
@@ -521,20 +558,40 @@ def setup_default_survey(name, kwargs):
             # 'num_visits': 1000,
             'exposure_time': 15,
             'series_length': 2,
-            'dead_time': 2,
-            'slew_time': 10,
+            'dead_time': 2.5,
+            'slew_time': 5,
             'filter': 'g',
             'limmag': 24.5,
             'precision': 0.01,
 
-            'footprint': 0.5,
-            'cadence': 10,
-            'duty_cycle': 0.2,
+            # 'footprint': 0.5,
+            'cadence': 3,
+            'duty_cycle': 0.25,
             'location': 'south',
             'longitude': None,
             'latitude': None,
             'elevation': None,
             'duration': 10,
+            'distances': np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:]
+        },
+        'TESS': {
+            'name': 'TESS',
+            'telescope': 'TESS',
+            'field_area': 2300,
+            'exposure_time': 30 * 60,
+            'cadence': 2 * 365.25,  # visit per two year
+            'series_length': 27 * 24 * 60 / 30,  # 27 days, in 30min exposures
+            'dead_time': 0,
+            'filter': 'TESS',
+            'duty_cycle': 1.0,
+            'location': 'space',
+            'precision': 0.01,
+            'limmag': 15,
+            'prec_list': tess_rms,
+            'mag_list': tess_mag,
+            'footprint': 1,  # entire sky
+            'duration': 4,
+            'distances': np.geomspace(MIN_DIST_PC, 300, 100, endpoint=True)[1:]
         },
         'CURIOS': {
             'name': 'CuRIOS',
@@ -554,24 +611,29 @@ def setup_default_survey(name, kwargs):
             'longitude': None,
             'latitude': None,
             'duration': 2,
+            'distances': np.geomspace(MIN_DIST_PC, 1000, 100, endpoint=True)[1:]
         },
-        'TESS': {
-            'name': 'TESS',
-            'telescope': 'TESS',
-            'field_area': 2300,
-            'exposure_time': 30 * 60,
-            'cadence': 2 * 365.25,  # visit per two year
-            'series_length': 27 * 24 * 60 / 30,  # 27 days, in 30min exposures
+        'LAST': {
+            'name': 'LAST',
+            'telescope': '11" RASA',
+            'field_area': 355,
+            'exposure_time': 20,
+            'series_length': 20,
+            'cadence': 1.0,
             'dead_time': 0,
-            'filter': 'TESS',
-            'duty_cycle': 1.0,
-            'location': 'space',
-            'precision': 0.01,
-            'limmag': 15,
-            'prec_list': tess_rms,
-            'mag_list': tess_mag,
-            'footprint': 1,  # entire sky
-            'duration': 4,
+            'slew_time': 0,
+            'filter': 'white',
+            'limmag': 18.0,
+            'prec_list': [p[1] for p in last_mag_rms],
+            'mag_list': [p[0] for p in last_mag_rms],
+            'threshold': 5,
+            'duty_cycle': 0.25,
+            'location': 'north',
+            'longitude': None,
+            'latitude': None,
+            'elevation': None,
+            'duration': 3,
+            'distances': np.geomspace(MIN_DIST_PC, 1000, 100, endpoint=True)[1:]
         }
     }
 
@@ -620,13 +682,20 @@ if __name__ == "__main__":
     # sim.syst.print(surveys=['LSST'])
 
 
-    # cu = Survey('curios')
-    #
-    # cu.print()
-    # print()
-    #
-    # cu.apply_detection_statistics(sim.syst)
+    cu = Survey('curios')
+
+    cu.print()
+    print()
+
+    cu.apply_detection_statistics(sim.syst)
     # sim.syst.print(surveys=['CURIOS'])
+
+    last = Survey('last')
+    last.print()
+    print()
+
+    last.apply_detection_statistics(sim.syst)
+
     print()
     print('System overview:')
     sim.syst.print()

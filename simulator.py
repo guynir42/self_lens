@@ -279,12 +279,9 @@ class Simulator:
         if 'timestamps' in kwargs:
             self.timestamps = kwargs['timestamps']
         else:
-        # if self.timestamps is None:
-            time_range = 0.01 * self.orbital_period * 3600
-            time_range = 8 * self.crossing_time()  # in seconds
+            time_range = 16 * self.crossing_time()  # in seconds
             self.timestamps = np.linspace(-time_range, time_range, 2001, endpoint=True)
             self.timestamps /= translate_time_units(self.time_units)  # convert to correct units
-        # TODO: must store a hidden value of timestamps to tell them apart from the auto-generated timestamps
 
         phases = (self.timestamps * translate_time_units(self.time_units)) / (self.orbital_period * 3600)
 
@@ -293,12 +290,6 @@ class Simulator:
         y = projected_radius * np.cos(2 * np.pi * phases) * np.sin(self.declination / 180 * np.pi)
         self.position_radii = np.sqrt(x ** 2 + y ** 2)
         self.position_angles = np.arctan2(y, x)
-
-        # print(f'min(x)= {np.min(x)}, min(y)= {np.min(y)}, max(y)= {np.max(y)}')
-        # plt.plot(phases, x)
-        # plt.plot(phases, y)
-        # plt.plot(phases, self.position_radii)
-        # plt.legend(['x', 'y', 'r'])
 
     def choose_matrix(self, source_size=None):
 
