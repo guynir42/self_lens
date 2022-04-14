@@ -280,6 +280,7 @@ class Simulator:
             self.timestamps = kwargs['timestamps']
         else:
             time_range = 16 * self.crossing_time()  # in seconds
+            time_range = min(time_range, self.orbital_period * 3600 / 4)
             self.timestamps = np.linspace(-time_range, time_range, 2001, endpoint=True)
             self.timestamps /= translate_time_units(self.time_units)  # convert to correct units
 
@@ -391,12 +392,19 @@ class Simulator:
         lc = self.magnifications - 1
         ts = self.timestamps
 
-        peak_idx = len(lc) // 2
-        peak = np.max(lc)
-        half_idx = np.argmax(lc > 0.5 * peak)
-        # print(f'peak= {peak} | half_idx= {half_idx}')
+        center_idx = len(lc) // 2
+        peak_idx = np.argmax(lc[center_idx:]) + center_idx
+        peak = lc[peak_idx]
 
-        return 2 * (ts[peak_idx] - ts[half_idx])
+        for i in range(peak_idx, len(lc)):
+            if lc[i] < 0.5 * peak:
+                half_idx = i
+                break
+
+        # TODO: add interpolation
+
+
+        return 2 * (ts[half_idx] - ts[center_idx])
 
     def length_scale_estimate(self, precision=0.01, threshold=3):
         """
@@ -1123,9 +1131,12 @@ class System:
         phi = np.linspace(0, 2*np.pi, 1000)
         x = 2*np.cos(phi)
         y = 2*np.sin(phi) * np.sin(np.pi / 180 * (90 - self.inclination) * 50)
-        fmt = f'.{int(np.ceil(-np.log10(self.semimajor_axis)))}f'
+        if self.semimajor_axis < 1:
+            fmt = f'.{int(np.ceil(-np.log10(self.semimajor_axis)))}f'
+        else:
+            fmt = '.2f'
         ax[1].plot(x, y, '--k', label=f'a= {self.semimajor_axis:{fmt}}AU, '
-                                      f'i={self.inclination:.2f}$^\circ$, '
+                                      f'i={self.inclination:.3f}$^\circ$, '
                                       f'b={self.impact_parameter:.2f}$R_E$')
 
         legend_handles, legend_labels = ax[1].get_legend_handles_labels()

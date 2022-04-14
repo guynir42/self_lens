@@ -55,7 +55,7 @@ class Survey:
         # filters and image depths
         self.limmag = kwargs.get('limmag')  # objects fainter than this would not be seen at all  (faintest magnitude)
         self.precision = kwargs.get('precision')  # photometric precision per image (best possible value)
-        self.threshold = 3  # need 3 sigma for a detection by default
+        self.threshold = 5  # need 5 sigma for a detection by default
         self.mag_list = kwargs.get('mag_list')  # list of magnitudes over which the survey is sensitive
         self.prec_list = kwargs.get('prec_list')  # list of photometric precision for each mag_list item
         self.distances = kwargs.get('distances', np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:])
@@ -326,24 +326,26 @@ class Survey:
 
         # find the S/N for the best precision, then scale it for each distance
         # choose the detection method depending on the flare time and exposure time
+        # the snr represents the probability to detect a single flare (ignoring periodicity),
+        # assuming the flare occured inside the time span of the series
         if best_t_flare * 10 < t_exp:  # flare is much shorter than exposure time
             signal = np.sum(lc[1:] * np.diff(ts))  # total signal in flare (skip 1st bin of LC to multiply with diff)
             noise = t_exp * best_precision  # total noise in exposure
             snr = signal / noise
             snr = np.array([snr])  # put this into a 1D array
-            coverage = t_exp  # the only times where prob>0 is inside the exposure
-
+            # coverage = t_exp  # the only times where prob>0 is inside the exposure
+            coverage = t_series * t_exp / (t_exp + t_dead)  # some parts of t_series are dead times
         elif t_exp * 10 < best_t_flare < t_series / 10:  # exposures are short and numerous: can use matched-filter
+            # TODO: add dead time
             snr = np.sqrt(np.sum(lc ** 2)) / best_precision  # sum over different exposures hitting places on the LC
             snr = np.array([snr])  # put this into a 1D array
             coverage = t_series  # anywhere along the series has the same S/N (ignoring edge effects)
-            # print(f'snr= {snr} | coverage= {coverage}')
 
         else:  # all other cases require sliding window
             dt = ts[1] - ts[0]  # assume timestamps are uniformly sampled in the simulated LC
             N_exp = int(np.ceil(t_exp / dt))  # number of time steps in single exposure
             single_exposure_snr = np.convolve(lc, np.ones(N_exp), mode='same') / N_exp / best_precision
-            coverage = dt * len(single_exposure_snr)  # all points with non-zero S/N have prob>0
+            # coverage = dt * len(single_exposure_snr)  # all points with non-zero S/N have prob>0
 
             if self.series_length == 1:
                 snr = single_exposure_snr
@@ -352,8 +354,8 @@ class Survey:
                 # For a given exposure start time relative to the flare,
                 # we need to sum the (S/N)**2 curve in jumps of N_btw_repeats.
                 # Essentially this means folding the (S/N)**2 curve over N_btw_repeats,
-                # and then saving the total (matched-filter) S/N for each offset inside
-                # one exposure.
+                # and then saving the total (matched-filter) S/N for each offset
+                # of the series start time (modulo exposures).
                 N_btw_repeats = int(np.ceil((t_exp + t_dead) / dt))  # number of steps between repeat exposures
                 snr_square = single_exposure_snr ** 2
                 number_bins = (len(snr_square) // N_btw_repeats + 1) * N_btw_repeats
@@ -363,7 +365,6 @@ class Survey:
                 if self.series_length >= snr_square_reshaped.shape[0]:  # series is longer than flare time
                     snr = np.sqrt(np.sum(snr_square_reshaped, axis=0))  # S/N for each offset of the exposure
                 else:  # only part of the flare is covered by series, need multiple shifts
-
                     before = self.series_length // 2
                     after = (self.series_length + 1) // 2
                     # add a few additional time bins before/after the flare, for multiple exposures
@@ -375,7 +376,9 @@ class Survey:
                         idx_high = min(i + after, snr.shape[0])
                         snr[i, :] = np.sqrt(np.sum(snr_square_reshaped[idx_low:idx_high + 1, :], axis=0))
                     snr = np.reshape(snr, (1, -1))[0]  # matched-filter result per time shift
-                    coverage = dt * snr.shape[0]  # adjust the coverage to the additional time bins
+                    # coverage = dt * snr.shape[0]  # adjust the coverage to the additional time bins
+
+            coverage = t_series
 
         # snr must be a 1D array of S/N for each time offset (possibly with one element)
         # now add a dimension for each precision value
@@ -384,12 +387,12 @@ class Survey:
 
         # snr is 2D, with axis 0 for precision values, axis 1 for time offsets (each may be 1 element)
         # now calculate the probabilities
-
         prob = 0.5 * (1 + scipy.special.erf(snr - self.threshold))  # assume Gaussian distribution
         peak_prob = np.max(prob, axis=1)  # peak brightness of the flare assuming perfect timing
 
-        # find the average probability and number of detections
-
+        # find the average probability to make a detection, and the average number of detections
+        # now we must add the probability of a flare to be inside the span of the series
+        # and account for multiple flares inside the series
         if t_series < period:  # assume survey hits random phases of the orbit every time
             mean_prob = np.mean(prob, axis=1)  # average the probability over multiple time shifts
 
@@ -401,13 +404,13 @@ class Survey:
             num_detections = mean_prob
 
         else:  # assume full coverage in a single series
-            # if the flare occurs multiple times in a single visit/series, we must account for that
-            # the number of flares in the series is between N and N+1 (depending on fraction of period)
+            # if the flare occurs multiple times in a single visit/series, we must account for the fact
+            # that the number of flares in the series is between N and N+1 (depending on fraction of period)
             num_flares_in_series = t_series // period
-            fraction = (t_series - num_flares_in_series * period) / period  # fraction of period after num_flares were seen
+            fraction = t_series % period / period  # fraction of period after num_flares were seen
 
             # a simplifying assumption that for multiple flares in a series,
-            # the peak_prob is always seen for each flare.
+            # the peak_prob is the same for each flare.
             prob1 = 1 - (1 - peak_prob) ** num_flares_in_series  # at least one detection
             prob2 = 1 - (1 - peak_prob) ** (num_flares_in_series + 1)  # at least one detection
             mean_prob = prob1 * (1 - fraction) + prob2 * fraction  # weighted average of the two options
@@ -507,6 +510,33 @@ def setup_default_survey(name, kwargs):
     tess_mag = np.arange(6, 15, 0.5)
     tess_rms = np.interp(tess_mag, tess_mag_rough, tess_rms_rough)
 
+    # from Hanna's email:
+    # The table below contains values of the expected SNR for different source magnitudes and integration
+    # times for the CuRIOS monolithic, 15 cm optic and Sony IMS455 design. All values were taken for r-band
+    # observations.
+    curios_exp_times = [1, 15, 60, 300, 900]
+    curios_mag_snr = [
+        (14.0, 9.676, 37.789, 75.613, 169.1, 292.9),
+        (14.5, 7.49, 29.4, 58.8, 131.55, 227.85),
+        (15.0, 5.73, 22.6, 22.61, 45.28, 101.265, 175.4),
+        (15.5, 4.3104, 17.146, 34.342, 76.822, 133.069),
+        (16.0, 3.173, 12.750, 25.553, 57.170, 99.031),
+        (16.5, 2.279, 9.261, 18.574, 41.563, 71.998),
+        (17.0, 2.279, 9.261, 18.574, 41.563, 71.998),
+        (17.5, 1.594, 6.555, 13.155, 29.444, 51.006),
+        (18.0, 0.726, 3.045, 6.120, 13.702, 23.738),
+        (18.5, 0.476, 2.012, 4.046, 9.060, 15.696),
+        (19.0, 0.308, 1.310, 2.635, 5.902, 10.225),
+        (19.5, 0.198, 0.844, 1.698, 3.804, 6.591),
+        (20.0, 0.126, 0.540, 1.086, 2.434, 4.216),
+        (20.5, 0.080, 0.343, 0.691, 1.549, 2.684),
+        (21.0, 0.050, 0.218, 0.439, 0.983, 1.703)
+    ]
+    curios_chosen_exp_time = 15
+    idx = curios_exp_times.index(curios_chosen_exp_time) + 1  # plus one to account for the magnitude first element
+    curios_precision = [1 / m[idx] for m in curios_mag_snr if m[idx] > 3.0]
+    curios_mags = [m[0] for m in curios_mag_snr if m[idx] > 3.0]
+
     last_mag_rms = [
         (10.0, 0.005),
         (10.5, 0.005),
@@ -563,15 +593,13 @@ def setup_default_survey(name, kwargs):
             'filter': 'g',
             'limmag': 24.5,
             'precision': 0.01,
-
-            # 'footprint': 0.5,
             'cadence': 3,
             'duty_cycle': 0.25,
             'location': 'south',
             'longitude': None,
             'latitude': None,
             'elevation': None,
-            'duration': 10,
+            'duration': 5,
             'distances': np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:]
         },
         'TESS': {
@@ -590,27 +618,45 @@ def setup_default_survey(name, kwargs):
             'prec_list': tess_rms,
             'mag_list': tess_mag,
             'footprint': 1,  # entire sky
-            'duration': 4,
+            'duration': 5,
             'distances': np.geomspace(MIN_DIST_PC, 300, 100, endpoint=True)[1:]
         },
         'CURIOS': {
             'name': 'CuRIOS',
             'field_area': 5 ** 2 * np.pi,  # 10 deg f.o.v diameter
-            # 'num_visits': 1,
-            'exposure_time': 10,
-            'filter': 'i',
-            'limmag': 18.0,
-            'precision': 0.01,
-            'series_length': None,  # find this value automatically
-            'slew_time': 3600,
-            'footprint': 1.0 / 525,
-            'cadence': 1,
-            'duration': 1,
-            'duty_cycle': 1.0,
+            'exposure_time': curios_chosen_exp_time,
+            'filter': 'r',
+            # 'series_length': None,  # find this value automatically
+            'series_length': 60,  # 15 minute visits, with 15 second exposures
+            'mag_list': curios_mags,
+            'prec_list': curios_precision,
+            'slew_time': 5,
+            # 'footprint': 1.0 / 525,
+            'cadence': 1.5 / 24,  # orbit of 1.5 hours, in units of visits per day
+            'duty_cycle': 0.95,
             'location': 'space',
             'longitude': None,
             'latitude': None,
-            'duration': 2,
+            'duration': 5,
+            'distances': np.geomspace(MIN_DIST_PC, 1000, 100, endpoint=True)[1:]
+        },
+        'CURIOS ARRAY': {
+            'name': 'CuRIOS array',
+            'field_area': 4 * 180 ** 2 / np.pi,  # entire sky
+            'exposure_time': curios_chosen_exp_time,
+            'filter': 'r',
+            'mag_list': curios_mags,
+            'prec_list': curios_precision,
+            # 'series_length': None,  # find this value automatically
+            'series_length': 60,  # 15 minute visits, with 15 second exposures
+            # 'footprint': 1.0,
+            'cadence': 15 / 24 / 60,  # start a new series every 15 minutes
+            'slew_time': 5,
+            'duty_cycle': 0.95,
+            'location': 'space',
+            'longitude': None,
+            'latitude': None,
+            'duration': 5,
             'distances': np.geomspace(MIN_DIST_PC, 1000, 100, endpoint=True)[1:]
         },
         'LAST': {
@@ -626,18 +672,17 @@ def setup_default_survey(name, kwargs):
             'limmag': 18.0,
             'prec_list': [p[1] for p in last_mag_rms],
             'mag_list': [p[0] for p in last_mag_rms],
-            'threshold': 5,
             'duty_cycle': 0.25,
             'location': 'north',
             'longitude': None,
             'latitude': None,
             'elevation': None,
-            'duration': 3,
+            'duration': 5,
             'distances': np.geomspace(MIN_DIST_PC, 1000, 100, endpoint=True)[1:]
         }
     }
 
-    name = name.upper().replace('_', '')
+    name = name.upper().replace('_', ' ')
 
     if name not in defaults:
         # raise KeyError(f'Could not find name "{kwargs["name"]}" in defaults. ')
@@ -655,11 +700,12 @@ if __name__ == "__main__":
 
     sim = simulator.Simulator()
     sim.calculate(
-        lens_mass=1.5,
+        lens_mass=0.6,
         star_mass=0.6,
         star_temp=10000,
-        declination=0.001,
-        semimajor_axis=0.001,
+        lens_temp=10000,
+        declination=0.000,
+        semimajor_axis=0.18,
     )
 
     # sim.syst.plot()
@@ -668,6 +714,11 @@ if __name__ == "__main__":
     tess.print()
     tess.apply_detection_statistics(sim.syst)
     # sim.syst.print(surveys=['TESS'])
+    # print(f'effective volume (P={sim.syst.period_string()})= {sim.syst.effective_volumes["TESS"]:.2e}')
+
+    # sim.calculate(semimajor_axis=0.2)
+    # tess.apply_detection_statistics(sim.syst)
+    # print(f'effective volume (P={sim.syst.period_string()})= {sim.syst.effective_volumes["TESS"]:.2e}')
 
     print()
     ztf = Survey('ztf')
@@ -679,23 +730,23 @@ if __name__ == "__main__":
     lsst = Survey('LSST')
     lsst.print()
     lsst.apply_detection_statistics(sim.syst)
-    # sim.syst.print(surveys=['LSST'])
 
-
-    cu = Survey('curios')
-
-    cu.print()
     print()
-
+    cu = Survey('curios')
+    cu.print()
     cu.apply_detection_statistics(sim.syst)
     # sim.syst.print(surveys=['CURIOS'])
 
-    last = Survey('last')
-    last.print()
     print()
+    array = Survey('curios array')
+    array.print()
+    cu.apply_detection_statistics(sim.syst)
 
-    last.apply_detection_statistics(sim.syst)
+    # print()
+    # last = Survey('last')
+    # last.print()
+    # last.apply_detection_statistics(sim.syst)
 
-    print()
-    print('System overview:')
-    sim.syst.print()
+    # print()
+    # print('System overview:')
+    # sim.syst.print()

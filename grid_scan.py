@@ -1,3 +1,5 @@
+import os
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from timeit import default_timer as timer
@@ -77,10 +79,10 @@ class Grid:
             masses and mass steps.
         """
 
-        self.star_masses = np.round(np.arange(0.2, 1.5, 0.2), 2)
-        # self.star_temperatures = np.arange(5000, 35000, 5000)
-        self.star_temperatures = np.array([5000, 10000, 20000, 30000])
-
+        self.star_masses = np.round(np.arange(0.2, 1.3, 0.2), 2)
+        # self.star_temperatures = np.arange(5000, 45000, 5000)
+        # self.star_temperatures = np.array([5000, 10000, 20000, 30000])
+        self.star_temperatures = np.round(np.geomspace(4000, 32000, 4))
         if wd_lens:
             self.lens_masses = self.star_masses
             self.lens_temperatures = self.star_temperatures
@@ -90,7 +92,7 @@ class Grid:
 
         self.semimajor_axes = np.geomspace(1e-3, 10, 100)
         # self.declinations = np.linspace(0, 90, 90001)
-        self.declinations = np.linspace(0, 0.25, 101)
+        self.declinations = np.linspace(0, 1.0, 201)
         # self.declinations = np.geomspace(1e-5, 5, 10000)
 
         print(f'Total number of parameters: {self.get_num_parameters()}')
@@ -119,7 +121,7 @@ class Grid:
         coord_size = self.get_num_parameters()
         num_arrays = 11
         num_small_arrays = 3
-        total_size_bytes = (num_arrays * len(self.surveys) + num_small_arrays) * coord_size * 8
+        total_size_bytes = (num_arrays * len(self.surveys) + num_small_arrays) * coord_size * 4
 
         return total_size_bytes / 1024 ** 3  # return GBs
 
@@ -157,14 +159,15 @@ class Grid:
         survey_names = [s.name for s in self.surveys]
         coord_names = list(coords.keys())
         coord_lengths = tuple(len(v) for v in coords.values())
-        nan_array = np.empty(coord_lengths)
+        nan_array = np.empty(coord_lengths, dtype=np.float32)
         nan_array[:] = np.nan
-        zeros_array = np.zeros(coord_lengths + (len(self.surveys),))
+        zeros_array = np.zeros(coord_lengths + (len(self.surveys),), dtype=np.float32)
 
         data_vars = {
             'system_index': (coord_names, nan_array.copy()),
             'orbital_period': (coord_names, nan_array.copy()),
             'peak_magnification': (coord_names, nan_array.copy()),
+            'fwhm': (coord_names, nan_array.copy()),
             'distance': (coord_names + ['survey'], zeros_array.copy()),
             'volume': (coord_names + ['survey'], zeros_array.copy()),
             'total_volume': (coord_names + ['survey'], zeros_array.copy()),
@@ -224,6 +227,7 @@ class Grid:
                                 s = self.simulator.syst  # shorthand
                                 data_vars['orbital_period'][1][lt, st, ml, ms, a, d] = s.orbital_period
                                 data_vars['peak_magnification'][1][lt, st, ml, ms, a, d] = max(s.magnifications)
+                                data_vars['fwhm'][1][lt, st, ml, ms, a, d] = s.fwhm
 
                                 for i, sur in enumerate(survey_names):
 
@@ -245,6 +249,8 @@ class Grid:
                                     self.simulator.syst.magnifications = None
                                     self.simulator.syst.timestamps = None
                                     self.systems.append(self.simulator.syst)  # add this system to the list
+                                    data_vars['system_index'][1][lt, st, ml, ms, a, d] = len(self.systems) - 1
+
                                 self.timing['store data'] += timer() - t1
 
                             count += 1  # number of parameters already covered, not including declination
@@ -327,6 +333,11 @@ class Grid:
             long_name='Peak magnification',
             doc='The maximum flare magnification relative to the baseline flux.'
         )
+        ds.fwhm.attrs = dict(
+            long_name='Full Width at Half Maximum',
+            units='seconds',
+            doc='The flare full width at half maximum (FWHM).'
+        )
         ds.distance.attrs = dict(
             long_name='Maximal visible distance',
             units='pc',
@@ -399,7 +410,7 @@ class Grid:
         new_ev.attrs['units'] = 'pc^3'
         return new_ev
 
-    def get_probability_model(self, sma_dist=0, lens_mass_dist=0, star_mass_dist=0, lens_temp_dist=0, star_temp_dist=0):
+    def get_probability_density(self, lens_temp=0, star_temp=0, lens_mass=0, star_mass=0, sma=0):
         """
         generate a DataArray with the same dimensions
         as the grid scan results dataset,
@@ -420,20 +431,25 @@ class Grid:
 
         Each parameter can be a scalar,
         in which case it is used as a power law index,
-        or as a vector of the appropriate length,
-        containing the relative probability
-        to get each value in the axis.
+        or a two-element list/array, in which case the
+        elements are treated as mu and sigma of a
+        gaussian distribution,
+        or as a vector of the same length as the
+        data coordinates, in which case the values
+        are taken as proportional to the
+        probability density.
 
-        :param sma_dist: float scalar or array
-            distribution or power law index for the semimajor axis probabilities.
-        :param lens_mass_dist: float scalar or array
-            distribution or power law index for the lens mass axis probabilities.
-        :param star_mass_dist: float scalar or array
-            distribution or power law index for the star mass axis probabilities.
-        :param lens_temp_dist: float scalar or array
+        :param lens_temp: float scalar or array
             distribution or power law index for the lens temperature axis probabilities.
-        :param star_temp_dist: float scalar or array
+        :param star_temp: float scalar or array
             distribution or power law index for the star temperature axis probabilities.
+        :param lens_mass: float scalar or array
+            distribution or power law index for the lens mass axis probabilities.
+        :param star_mass: float scalar or array
+            distribution or power law index for the star mass axis probabilities.
+        :param sma: float scalar or array
+            distribution or power law index for the semimajor axis probabilities.
+        
         :return:
             a DataArray with the same dims as the main result dataset,
             excluding "survey" and "declinations".
@@ -444,70 +460,142 @@ class Grid:
         if self.dataset is None:
             raise ValueError('Must have a dataset first!')
 
-        if sma_dist is None:
-            sma_dist = 0
-        if hasattr(sma_dist, '__len__'):
-            if len(self.dataset.semimajor_axis) != len(sma_dist):
-                raise ValueError('Mismatch in size of semimajor axis distribution.')
-        else:  # if scalar, apply it as power law
-            sma_dist = self.dataset.semimajor_axis ** sma_dist
+        def parse_par(par, data):
+            """
+            Interpret the incoming parameter.
+            If scalar, interpret as power law.
+            If two-element, treat as gaussian mean/std.
+            If length is equal to data, use it
+            directly as the relative probability density.
+            """
+            if par is None:
+                par = 0  # convert to flat density
 
-        if lens_mass_dist is None:
-            lens_mass_dist = 0
-        if hasattr(lens_mass_dist, '__len__'):
-            if len(self.dataset.lens_mass) != len(lens_mass_dist):
-                raise ValueError('Mismatch in size of lens mass distribution.')
-        else:  # if scalar, apply it as power law
-            lens_mass_dist = self.dataset.lens_mass ** lens_mass_dist
+            if not hasattr(par, '__len__'):
+                return data.astype(float) ** float(par)  # use a power law
+            if type(par) == xr.DataArray:
+                return par  # return this directly
+            if len(par) == 2:
+                return np.exp(-0.5 * (data - par[0]) ** 2 / par[1] ** 2)
+            if len(par) != len(data):
+                raise ValueError(f'Mismatch of parameter ({len(par)}) and data ({len(data)}).')
 
-        if star_mass_dist is None:
-            star_mass_dist = 0
-        if hasattr(star_mass_dist, '__len__'):
-            if len(self.dataset.star_mass) != len(star_mass_dist):
-                raise ValueError('Mismatch in size of star mass distribution.')
-        else:  # if scalar, apply it as power law
-            star_mass_dist = self.dataset.star_mass ** star_mass_dist
+            # if none of the above, just use the "par" values
+            # as the new data in an array the same size as
+            # the relevant coordinate
+            new_array = xr.full_like(data)
+            new_array.data = par
+            return par  # the parameter values are taken as the density values
 
-        if lens_temp_dist is None:
-            lens_temp_dist = 0
-        if hasattr(lens_temp_dist, '__len__'):
-            if len(self.dataset.lens_temp) != len(lens_temp_dist):
-                raise ValueError('Mismatch in size of lens temperature distribution.')
-            lens_temp_dist = xr.DataArray(data=lens_temp_dist, coord=self.dataset.lens_temp)
-        else:  # if scalar, apply it as power law
-            lens_temp_dist = self.dataset.lens_temp ** lens_temp_dist
-
-        if star_temp_dist is None:
-            star_temp_dist = 0
-        if hasattr(star_temp_dist, '__len__'):
-            if len(self.dataset.star_temp) != len(star_temp_dist):
-                raise ValueError('Mismatch in size of star temperature distribution.')
-            star_temp_dist = xr.DataArray(data=star_temp_dist, coord=self.dataset.star_temp)
-        else:  # if scalar, apply it as power law
-            star_temp_dist = self.dataset.star_temp ** star_temp_dist
+        sma_dist = parse_par(sma, self.dataset.semimajor_axis)
+        lens_mass_dist = parse_par(lens_mass, self.dataset.lens_mass)
+        star_mass_dist = parse_par(star_mass, self.dataset.star_mass)
+        lens_temp_dist = parse_par(lens_temp, self.dataset.lens_temp)
+        star_temp_dist = parse_par(star_temp, self.dataset.star_temp)
 
         prob = lens_temp_dist * star_temp_dist * lens_mass_dist * star_mass_dist * sma_dist
         prob = prob / np.sum(prob)
 
         new_arr = xr.full_like(self.dataset.effective_volume, 0)
         new_arr = new_arr.isel(survey=0, declination=0)  # get rid of unneeded coordinates
-        new_arr.attrs['long_name'] = 'Probability model'
-        new_arr.attrs['doc'] = 'Probability to find each type of system.'
+        new_arr = new_arr.drop('survey')
+        new_arr = new_arr.drop('declination')
+        new_arr.name = 'probability_density'
+        new_arr.attrs['long_name'] = 'WD probability density'
+        new_arr.attrs['doc'] = 'Probability to find each type of white dwarf system.'
         if 'units' in new_arr.attrs:
             del new_arr.attrs['units']
         new_arr.data = prob
 
-        self.dataset['probability_model'] = new_arr
+        self.dataset['probability_density'] = new_arr
 
         return new_arr
 
+    def get_default_probability_density(self, temp='mid', mass='mid', sma='mid'):
+        """
+        Use the parameters in reference Maoz et al 2018
+        (https://ui.adsabs.harvard.edu/abs/2018MNRAS.476.2584M/abstract)
+        to generate a probability density for white dwarfs.
+        Each parameter (temp, mass, sma->semimajor axis)
+        controls of we want to get the "mid" (best estimate
+        value) or "low" or "high" for the lower or higher
+        models.
+        """
+
+        # less negative slope of the temperature power law
+        # indicates more hot WDs and so, more detections.
+        if temp == 'mid':
+            temp = -2
+        elif temp == 'low':
+            temp = -3
+        elif temp == 'high':
+            temp = -1
+        else:
+            raise ValueError(f'Unknown option "{temp}". Use "low", "high" or "mid".')
+
+        # right now, only have one mass model
+        if mass == 'mid':
+            mass = (0.6, 0.2)
+        elif mass == 'low':
+            mass = (0.6, 0.2)
+        elif mass == 'high':
+            mass = (0.6, 0.2)
+        else:
+            raise ValueError(f'Unknown option "{mass}". Use "low", "high" or "mid".')
+
+        if sma == 'mid':
+            sma = -1.3
+        elif sma == 'low':
+            sma = -1.0
+        elif sma == 'high':
+            sma = -1.5
+        else:
+            raise ValueError(f'Unknown option "{sma}". Use "low", "high" or "mid".')
+
+        sma = self.semimajor_axis_distribution(sma)
+
+        return self.get_probability_density(lens_temp=temp, star_temp=temp, lens_mass=mass, star_mass=mass, sma=sma)
+
+    def semimajor_axis_distribution(self, alpha):
+        """
+        The parametrization given in reference Maoz et al 2018
+        (https://ui.adsabs.harvard.edu/abs/2018MNRAS.476.2584M/abstract)
+        This tells us the present day distribution of semimajor axis
+        for binary WDs with an initial sma distribution with power law
+        index alpha.
+
+        :param alpha: scalar float
+            The power law index of the zero age, semimajor axis power law index
+            for binary white dwarfs that emerge from the comme envelope phase.
+
+        :return: xarray data array
+            The distribution of the number density (not normalized to anything)
+            of the binary white dwarfs, based on their masses and semimajor axis.
+        """
+        # G_over_c = 1.2277604981899157e-73  # = G**3/c**5 = (6.6743e-11) ** 3 / (299792458) ** 5 in MKS!
+        # const = 6.286133750732368e-72  # = 256 / 5 * G_over_c
+        # const = const / (1.496e11) ** 4 * 3.15576e16 * (1.989e30) ** 3  # unit conversions
+        const = 3.116488722396829e-09  # in units of AU^4 Gyr^-1 solar_mass ^-3
+
+        a = self.dataset.semimajor_axis
+        m1 = self.dataset.lens_mass
+        m2 = self.dataset.star_mass
+        t0 = 13.5  # age of the galaxy in Gyr
+
+        x = a / (const * m1 * m2 * (m1 + m2) * t0) ** (1/4)
+
+        if alpha == -1:
+            return x ** 3 * np.log(1 + x ** (-4))
+        else:
+            return x ** (4 + alpha) * ((1 + x ** (-4)) ** ((alpha + 1) / 4) - 1)
+
     def get_total_volume(self):
 
-        if 'probability_model' not in self.dataset:
+        if 'probability_density' not in self.dataset:
             raise KeyError('Need to first calculate a probability model!')
 
         eff = self.marginalize_declinations()
-        prob = self.dataset.probability_model
+        prob = self.dataset.probability_density
 
         return (eff * prob).sum()
 
@@ -557,13 +645,47 @@ class Grid:
 
 
 if __name__ == "__main__":
+
+    if len(sys.argv) > 1:
+        survey_name = sys.argv[1].upper()
+    else:
+        survey_name = 'all_surveys'
+
+    if len(sys.argv) > 2:
+        demo_mode = sys.argv[2].upper()
+    else:
+        demo_mode = 'DEMO'
+
+    if demo_mode not in ['DEMO', 'FULL']:
+        raise ValueError('Value of "demo_mode" must be "DEMO" or "REAL". '
+                         f'Instead got "{demo_mode}".')
+
+    print(f'Running {demo_mode} simulation for survey: {survey_name}')
+
     g = Grid()
-    # g.setup_demo_scan()
+    if demo_mode == 'DEMO':
+        g.setup_demo_scan()
+
+    if survey_name != 'all_surveys':
+        g.surveys = [survey.Survey(survey_name)]
+
     g.run_simulation()
     # g.summarize()
-    g.get_probability_model()
+    prob = g.get_probability_density()
     total_vol = float(g.get_total_volume())
     print(f'total volume: {total_vol:.1f}pc^3')
     # g.datset = xr.load_dataset('saved/grid_data.nc')
-    ev = g.marginalize_declinations()
+    # ev = g.marginalize_declinations()
 
+    # ds = g.dataset
+    # ds.sel(star_temp=10000, lens_temp=10000, lens_mass=0.6, star_mass=0.6).isel(declination=0).effective_volume.plot(hue='survey', marker='*')
+    # plt.xscale('log')
+    # plt.yscale('log')
+
+    try:
+        os.mkdir('saved')
+    except FileExistsError:
+        pass
+
+    if demo_mode == 'FULL':
+        g.dataset.to_netcdf(f'saved/simulate_{survey_name}.nc')
