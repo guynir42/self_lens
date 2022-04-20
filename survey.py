@@ -6,6 +6,7 @@ and from that figures out the probability of detection for those system paramete
 import numpy as np
 import scipy.special
 from timeit import default_timer as timer
+import matplotlib.pyplot as plt
 
 import simulator
 
@@ -55,7 +56,7 @@ class Survey:
         # filters and image depths
         self.limmag = kwargs.get('limmag')  # objects fainter than this would not be seen at all  (faintest magnitude)
         self.precision = kwargs.get('precision')  # photometric precision per image (best possible value)
-        self.threshold = 5  # need 5 sigma for a detection by default
+        self.threshold = kwargs.get('threshold', 5)  # need 5 sigma for a detection by default
         self.mag_list = kwargs.get('mag_list')  # list of magnitudes over which the survey is sensitive
         self.prec_list = kwargs.get('prec_list')  # list of photometric precision for each mag_list item
         self.distances = kwargs.get('distances', np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:])
@@ -129,7 +130,7 @@ class Survey:
 
         self.footprint = self.num_fields * self.field_area / (4 * 180 ** 2 / np.pi)
 
-    def apply_detection_statistics(self, system):
+    def apply_detection_statistics(self, system, plotting=False):
         """
         Find the detection probability for the given system and this survey,
         assuming the system is placed at different distances.
@@ -194,6 +195,7 @@ class Survey:
             return  # cannot observe this target at all, we have no precision for this magnitude
 
         # figure out the S/N for this lightcurve, and compare it to the precision we have at each distance
+
         # shorthand for lightcurve and timestamps
         lc = (system.magnifications - 1) * dilution
         ts = system.timestamps
@@ -210,6 +212,7 @@ class Survey:
 
         flare_time_per_distance = []
         for p in prec:
+            # p *= self.threshold
             if np.all(det_lc > p):
                 # this should not happen in general, if there are enough points outside the flare
                 raise ValueError('All lightcurve points are above precision level!')
@@ -227,6 +230,8 @@ class Survey:
                 t_flare = t1 + (p - l1) / (l2 - l1) * (t2 - t1)  # linear interpolation
                 t_flare *= 2  # symmetric lightcurve
                 flare_time_per_distance.append(t_flare)
+                # if plotting:
+                #     print(f't1= {t1}, t2= {t2}, l1= {l1}, l2= {l2}, t_flare= {t_flare}')
 
         # get rid of distances, precisions and flare durations where the flare is totally undetectable
         flare_time_per_distance = np.array(flare_time_per_distance)
@@ -245,15 +250,22 @@ class Survey:
         system.flare_durations[self.name] = flare_time_per_distance
         system.precisions[self.name] = prec
 
-        best_precision_idx = np.argmax(prec) if len(prec) else []  # index of best precision
+        best_precision_idx = np.argmin(prec) if len(prec) else []  # index of best precision
         best_precision = prec[best_precision_idx]
         best_flare_time = flare_time_per_distance[best_precision_idx]
 
         period = system.orbital_period * 3600  # convert to seconds
         if len(prec):  # only calculate probabilities for distances that have any chance of detection
 
-            t1 = timer()
-            (peak_prob, mean_prob, num_detections) = self.calc_prob(lc, ts, prec, best_precision, best_flare_time, period)
+            (peak_prob, mean_prob, num_detections) = self.calc_prob(
+                lc,
+                ts,
+                prec,
+                best_precision,
+                best_flare_time,
+                period,
+                plotting
+            )
 
             if self.exposure_time > period:  # this only applies to simple S/N case of diluted signal
                 pass  # TODO: figure out this case later
@@ -277,7 +289,7 @@ class Survey:
         if self.name not in (s.name for s in system.surveys):
             system.surveys.append(self)
 
-    def calc_prob(self, lc, ts, precision, best_precision, best_t_flare, period):
+    def calc_prob(self, lc, ts, precision, best_precision, best_t_flare, period, plotting=False):
         """
         For a given lightcurve calculate the S/N and time coverage.
         In some cases the S/N is just one number, while in other cases
@@ -319,7 +331,6 @@ class Survey:
                            for each flare in the series).
 
         """
-        t1 = timer()
         t_exp = self.exposure_time
         t_dead = self.dead_time
         t_series = (t_exp + t_dead) * self.series_length
@@ -333,13 +344,14 @@ class Survey:
             noise = t_exp * best_precision  # total noise in exposure
             snr = signal / noise
             snr = np.array([snr])  # put this into a 1D array
+
             # coverage = t_exp  # the only times where prob>0 is inside the exposure
-            coverage = t_series * t_exp / (t_exp + t_dead)  # some parts of t_series are dead times
+            dt = t_series * t_exp / (t_exp + t_dead)  # some parts of t_series are dead times
         elif t_exp * 10 < best_t_flare < t_series / 10:  # exposures are short and numerous: can use matched-filter
             # TODO: add dead time
             snr = np.sqrt(np.sum(lc ** 2)) / best_precision  # sum over different exposures hitting places on the LC
             snr = np.array([snr])  # put this into a 1D array
-            coverage = t_series  # anywhere along the series has the same S/N (ignoring edge effects)
+            dt = t_series  # anywhere along the series has the same S/N and prob (ignoring edge effects)
 
         else:  # all other cases require sliding window
             dt = ts[1] - ts[0]  # assume timestamps are uniformly sampled in the simulated LC
@@ -349,36 +361,38 @@ class Survey:
 
             if self.series_length == 1:
                 snr = single_exposure_snr
+                multiplicative_factor = 1  # the S/N values are the only valid probability points
             else:
                 # Need to calculate the matched-filter result for several exposures.
-                # For a given exposure start time relative to the flare,
-                # we need to sum the (S/N)**2 curve in jumps of N_btw_repeats.
-                # Essentially this means folding the (S/N)**2 curve over N_btw_repeats,
-                # and then saving the total (matched-filter) S/N for each offset
-                # of the series start time (modulo exposures).
-                N_btw_repeats = int(np.ceil((t_exp + t_dead) / dt))  # number of steps between repeat exposures
-                snr_square = single_exposure_snr ** 2
-                number_bins = (len(snr_square) // N_btw_repeats + 1) * N_btw_repeats
-                snr_square = np.pad(snr_square, (0, number_bins - len(snr_square)))
-                snr_square_reshaped = np.reshape(snr_square, (-1, N_btw_repeats))
+                # go over the single-image response and convolve that
+                # with the addition of multiple values from separate exposures
+                N_btw = int(np.ceil((t_exp + t_dead) / dt))  # number of steps between repeat exposures
+                N_flare = int(np.ceil(best_t_flare / dt))
+                N_filter = min(N_flare * 5, int(N_btw * self.series_length))  # number of steps in filter
+                # if we only sample probabilities from a subset of the series
+                # then we must increase the total prob*dt later
+                multiplicative_factor = N_filter * dt / t_series
 
-                if self.series_length >= snr_square_reshaped.shape[0]:  # series is longer than flare time
-                    snr = np.sqrt(np.sum(snr_square_reshaped, axis=0))  # S/N for each offset of the exposure
-                else:  # only part of the flare is covered by series, need multiple shifts
-                    before = self.series_length // 2
-                    after = (self.series_length + 1) // 2
-                    # add a few additional time bins before/after the flare, for multiple exposures
-                    snr_square_reshaped = np.pad(snr_square_reshaped, ((before, after), (0, 0)))
+                # the filter samples the mid exposure with the correct dead time
+                matched_filter = np.zeros(N_filter)
+                matched_filter[N_exp // 2::N_btw] = 1
+                snr = np.sqrt(np.convolve(single_exposure_snr ** 2, matched_filter, mode='same'))
 
-                    snr = np.zeros(snr_square_reshaped.shape)
-                    for i in range(snr.shape[0]):
-                        idx_low = max(i - before, 0)
-                        idx_high = min(i + after, snr.shape[0])
-                        snr[i, :] = np.sqrt(np.sum(snr_square_reshaped[idx_low:idx_high + 1, :], axis=0))
-                    snr = np.reshape(snr, (1, -1))[0]  # matched-filter result per time shift
-                    # coverage = dt * snr.shape[0]  # adjust the coverage to the additional time bins
+                # coverage = t_series / (dt * N_filter)
 
-            coverage = t_series
+            # coverage = min(coverage, period)  # coverage cannot exceed period (when series is longer, see below)
+
+        if plotting:
+            print(f'Flare duration= {best_t_flare:.2f}s | coverage= {coverage:.2f}s')
+            plt.clf()
+            plt.plot(ts, lc, '-x', label='Raw magnification')
+            if snr.shape == (1,):
+                plt.plot(ts, np.ones(ts.shape) * snr[0], '--', label='S/N value')
+            else:
+                plt.plot(ts, snr, '--o', label='S/N curve')
+            plt.xlabel('Time [seconds]')
+            plt.legend()
+            plt.show()
 
         # snr must be a 1D array of S/N for each time offset (possibly with one element)
         # now add a dimension for each precision value
@@ -394,10 +408,18 @@ class Survey:
         # now we must add the probability of a flare to be inside the span of the series
         # and account for multiple flares inside the series
         if t_series < period:  # assume survey hits random phases of the orbit every time
-            mean_prob = np.mean(prob, axis=1)  # average the probability over multiple time shifts
+            # mean_prob = np.mean(prob, axis=1)  # average the probability over multiple time shifts
+            #
+            # # dilute the det. prop. by the duty cycle (all the time the exposure may have been outside the event)
+            # mean_prob *= coverage / period
 
-            # dilute the det. prop. by the duty cycle (all the time the exposure may have been outside the event)
-            mean_prob *= coverage / period
+            # the probability for each time step dt
+            # (or entire series, if uniform probability)
+            # is summed to give the total probability
+            # divide by the period to get the real prob
+            # including the condition that flare is inside
+            # each of the dt ranges
+            mean_prob = np.sum(prob, axis=1) * dt / period
 
             # there's no way to see more than one flare in this series,
             # so the average number of detections is just the probability to see one
@@ -570,7 +592,7 @@ def setup_default_survey(name, kwargs):
             'limmag': 20.5,
             'prec_list': ztf_rms,
             'mag_list': ztf_mag,
-            'threshold': 7.5,
+            'threshold': 5,
             # 'footprint': 0.5,
             'cadence': 1.5,
             'duty_cycle': 0.25,
@@ -623,7 +645,8 @@ def setup_default_survey(name, kwargs):
         },
         'CURIOS': {
             'name': 'CuRIOS',
-            'field_area': 5 ** 2 * np.pi,  # 10 deg f.o.v diameter
+            # 'field_area': 5 ** 2 * np.pi,  # 10 deg f.o.v diameter
+            'field_area': 49,  # 7 degree square
             'exposure_time': curios_chosen_exp_time,
             'filter': 'r',
             # 'series_length': None,  # find this value automatically

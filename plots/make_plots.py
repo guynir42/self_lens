@@ -4,6 +4,8 @@ from os import path
 import numpy as np
 import matplotlib.pyplot as plt
 
+import xarray as xr
+
 import transfer_matrix
 import simulator
 import survey
@@ -143,7 +145,7 @@ ax.set_yscale('log')
 
 ax.plot([0], [0], 'bo', markersize=12, fillstyle='none', label='Roche lobe overflow')
 
-ax_min = 2e-7
+ax_min = 2.5e-3
 ax_max = 50
 
 ax.set_ylim(ax_min, ax_max)
@@ -171,24 +173,232 @@ ax.legend()
 ## save the plot
 
 plt.savefig('plots/mag_vs_period.pdf')
-
-## show blackbody
-
-la = np.linspace(200, 1200, 1000)
-f = simulator.black_body(la, 5778)
-
-plt.plot(la, f)
+plt.savefig('plots/mag_vs_period.png')
 
 
-## show the grid scan results
+## show a single system with the S/N results for ZTF
 
-# assume there's a dataset called ds
+## show a single system with the S/N results for LSST
 
-# define a function to mariginalize the declinations
-def marginalize_dec(ds):
-    dec = ds.declination * np.pi / 180
-    dec_step = dec[1]-dec[0]  # do something more complicated if uneven steps
-    new_ev = (ds.effective_volume * np.cos(dec) * dec_step).sum(dim='declination')
-    return new_ev
+## show a single system with the S/N results for TESS
 
-new_ev = marginalize_dec(ds)
+
+## show the WD sma models for different masses, with uncertainty ranges
+
+
+## show the precision as function of mag for surveys
+
+import survey
+
+survey_names = ['TESS', 'CURIOS', 'LSST', 'ZTF']
+markers = ['x', 'v', '*', '^', 's']
+
+fig = plt.figure(num=5).clf()
+fig, axes = plt.subplots(num=5, figsize=[12, 6])
+
+for i, s in enumerate(survey_names):
+    new_survey = survey.Survey(s)
+    if new_survey.prec_list is not None:
+        m = new_survey.mag_list
+        p = new_survey.prec_list
+    else:
+        m = np.linspace(12, new_survey.limmag)
+        p = np.ones(m.shape) * new_survey.precision
+    axes.plot(m, p, marker=markers[i], label=s)
+
+axes.legend(loc='upper left', fontsize=14)
+axes.set_xlabel('Magnitude', fontsize=14)
+axes.set_ylabel('Photometric precision', fontsize=14)
+axes.set_yscale('log')
+
+## save the plot
+
+plt.savefig('plots/photometric_precision.pdf')
+plt.savefig('plots/photometric_precision.png')
+
+
+## load the grid scan results for all surveys
+
+survey_names = ['ZTF', 'TESS', 'LSST', 'CURIOS', 'CURIOS_ARRAY', 'LAST']
+
+ds = None
+for survey in survey_names:
+    filename = f'/home/guyn/timeseries/self_lens/saved/simulate_{survey}.nc'
+    new_ds = xr.load_dataset(filename, decode_times=False)
+    for name in ['lens_temp', 'star_temp']:
+        new_ds[name] = np.round(new_ds[name])
+
+    if ds is None:
+        ds = new_ds
+    else:
+        ds = xr.concat([ds, new_ds], dim='survey')
+
+## show how the declination dies out at two distances for different surveys
+
+ds.flare_duration.sel(
+    lens_mass=0.6,
+    star_mass=0.6,
+    star_temp=8000,
+    lens_temp=8000,
+    survey=['TESS', 'LSST', 'CURIOS']
+).isel(
+    semimajor_axis=[50, 65],
+    declination=slice(0, 30)
+).plot(col='semimajor_axis', hue='survey', marker='*', figsize=[14, 6])
+
+# plt.yscale('log')
+
+## save the plot
+
+plt.savefig('plots/duration_vs_declination.pdf')
+plt.savefig('plots/duration_vs_declination.png')
+
+
+## show the simulation results for lens mass
+
+## show the simulation results for star mass
+
+## show the simulation results for lens temp
+
+## show the simulation results for star temp
+
+## show the simulation results for semimajor axis using a flat WD model and compare to real sma WD model
+
+
+## show how the declination dies out at two distances for different surveys
+
+import grid_scan
+
+# mass = 0.6
+# temp = 16000
+
+plt.clf()
+fig, axes = plt.subplots(num=10, figsize=[10, 6])
+
+surveys = ['TESS', 'CURIOS', 'LSST', 'CURIOS_ARRAY']
+markers = ['x', 'v', '*', '^', 's']
+sens = 1 / (ds.marginalized_volume * ds.probability_density_flat).sum(dim=['lens_mass', 'star_mass', 'lens_temp', 'star_temp'])
+# sens = 1 / ds.marginalized_volume
+
+# sens = sens.sel(
+#     lens_mass=mass,
+#     star_mass=0.6,
+#     star_temp=temp,
+#     lens_temp=8000,
+#     survey=surveys,
+# ).isel(
+# sens = sens.isel(
+#     semimajor_axis=slice(0, 65)
+# )
+
+sma = sens.semimajor_axis.values
+
+sens_curve = {}
+min_sma = np.inf
+for i, s in enumerate(surveys):
+    sens_curve[s] = sens.sel(survey=s).values
+    min_sma = min(min_sma, sma[np.argmin(np.isinf(sens_curve[s]))])
+    axes.plot(sma, sens_curve[s], label=s, marker=markers[i])
+
+g = grid_scan.Grid()
+g.dataset = ds
+
+space_density = 0.0055  # WDs per pc^3
+binary_fraction = 0.1
+prob = {}
+for m in ['mid', 'low', 'high']:
+    # model = g.get_default_probability_density(temp=m, mass=m, sma=m).sel(
+    #     lens_mass=mass,
+    #     star_mass=0.6,
+    #     star_temp=temp,
+    #     lens_temp=8000,
+    model = g.get_default_probability_density(temp=m, mass=m, sma=m).sum(
+        dim=[
+            'star_mass',
+            'lens_mass',
+            'star_temp',
+            'lens_temp',
+        ])
+    # ).isel(
+    #     semimajor_axis=slice(0, 65)
+    # )
+    prob[m] = model.values * space_density * binary_fraction
+
+axes.fill_between(sma, prob['low'], prob['high'], color='k', alpha=0.3, label=f'WD model')
+# axes.plot(sma, prob['mid'], color='k', label=f'{mass}M$_\odot$, {temp}$^\circ$K')
+axes.plot(sma, prob['mid'], color='k')
+
+axes.legend(loc='upper right', fontsize=14)
+
+axes.set_xlim((min_sma / 2, 0.4))
+# plt.ylim((float(sens.min() * 0.5), max(prob['mid']) * 1e2))
+
+axes.set_yscale('log')
+axes.set_xscale('log')
+
+axes.set_xlabel('Semimajor axis [AU]', fontsize=14)
+axes.set_ylabel('WD binary density [pc$^{-3}$]', fontsize=14)
+
+period = lambda x: x ** (2 / 3) * 365.25
+ax2 = axes.twiny()
+ax2.set_xlabel('Period [days]', fontsize=14)
+ax2.set_xlim([period(x) for x in axes.get_xlim()])
+ax2.set_xscale('log')
+
+plt.show()
+
+## save the plot
+
+plt.savefig('plots/sensitivity_vs_model.pdf')
+plt.savefig('plots/sensitivity_vs_model.png')
+
+## show the effective volume vs the density (reciprocal of the sensitivity)
+
+fig, axes = plt.subplots(num=11, figsize=[10, 6])
+fig.clf()
+fig, axes = plt.subplots(num=11, figsize=[10, 6])
+
+surveys = ['TESS', 'CURIOS', 'LSST', 'CURIOS_ARRAY']
+markers = ['x', 'v', '*', '^', 's']
+ev = (ds.marginalized_volume * ds.probability_density).sum(dim=['lens_mass', 'star_mass', 'lens_temp', 'star_temp'])
+sma = ev.semimajor_axis.values
+
+ev_curve = {}
+min_sma = np.inf
+for i, s in enumerate(surveys):
+    ev_curve[s] = ev.sel(survey=s).values
+    min_sma = min(min_sma, sma[np.argmin(ev_curve[s] > 0)])
+    axes.plot(sma, ev_curve[s], label=s, marker=markers[i])
+
+
+axes.set_yscale('log')
+axes.set_xscale('log')
+
+axes.set_xlabel('Semimajor axis [AU]', fontsize=14)
+axes.set_ylabel('effective volume [pc$^3$]', fontsize=14)
+
+axes.set_ylim((1e-3, 2e4))
+axes.set_xlim((5e-3, 10))
+
+period = lambda x: x ** (2 / 3) * 365.25
+ax2 = axes.twiny()
+ax2.set_xlabel('Period [days]', fontsize=14)
+ax2.set_xlim([period(x) for x in axes.get_xlim()])
+ax2.set_xscale('log')
+
+space_density = 0.0055
+binary_fraction = 0.1
+
+need_volume = 1 / (space_density * binary_fraction)
+axes.plot(sma, np.ones(sma.shape) * need_volume, '--', label=f'1 DWD per {int(need_volume)} pc$^3$')
+axes.legend(loc='upper right', fontsize=14, framealpha=1)
+
+plt.show()
+
+
+## save the plot
+
+plt.savefig('plots/effective_volume.pdf')
+plt.savefig('plots/effective_volume.png')
+
+

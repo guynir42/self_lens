@@ -14,7 +14,7 @@ import survey
 
 class Grid:
 
-    def __init__(self):
+    def __init__(self, wd_lens=True):
         self.star_masses = None
         self.star_temperatures = None
         self.star_type = 'WD'  # default is white dwarfs, can also choose 'MS' for main sequence
@@ -29,7 +29,7 @@ class Grid:
         self.systems = None  # a list of systems to save the results of each survey
         self.dataset = None  # an xarray dataset with the summary of the results
 
-        self.setup_default_scan()
+        self.setup_default_scan(wd_lens=wd_lens)
         self.setup_default_surveys()
 
         self.timing = None
@@ -49,21 +49,25 @@ class Grid:
         """
         self.star_masses = [0.3, 0.6, 0.9, 1.2]
         self.star_masses = [0.6]
-        self.star_temperatures = [5000, 10000, 20000]
-        self.star_temperatures = [10000]
+        self.star_temperatures = [4000, 8000, 16000]
+        self.star_temperatures = [8000]
 
         if wd_lens:
             self.lens_masses = self.star_masses
             self.lens_temperatures = self.star_temperatures
-        else:
-            self.lens_masses = np.arange(1.0, 30, 3)
-            self.lens_temperatures = [0]
+            self.semimajor_axes = np.geomspace(1e-3, 10, 100)
+            self.declinations = np.linspace(0, 1.0, 201)
 
-        self.semimajor_axes = np.geomspace(1e-3, 10, 100)
-        self.declinations = np.linspace(0, 0.25, 251)
+        else:
+            self.lens_masses = np.arange(5.0, 30, 5)
+            self.lens_temperatures = [0]
+            self.semimajor_axes = np.geomspace(1e-4, 1, 100)
+            self.declinations = np.linspace(0, 3.0, 501)
+
+        self.declinations = np.linspace(0, 3.0, 301)
         # self.declinations = np.geomspace(1e-5, 5, 100)
 
-        print(f'Total number of parameters: {self.get_num_parameters()}')
+        # print(f'Total number of parameters: {self.get_num_parameters()}')
 
     def setup_default_scan(self, wd_lens=True):
         """
@@ -95,7 +99,7 @@ class Grid:
         self.declinations = np.linspace(0, 1.0, 201)
         # self.declinations = np.geomspace(1e-5, 5, 10000)
 
-        print(f'Total number of parameters: {self.get_num_parameters()}')
+        # print(f'Total number of parameters: {self.get_num_parameters()}')
 
     def setup_default_surveys(self):
         """
@@ -161,24 +165,24 @@ class Grid:
         coord_lengths = tuple(len(v) for v in coords.values())
         nan_array = np.empty(coord_lengths, dtype=np.float32)
         nan_array[:] = np.nan
-        zeros_array = np.zeros(coord_lengths + (len(self.surveys),), dtype=np.float32)
+        zeros_array = np.zeros((len(self.surveys),) + coord_lengths, dtype=np.float32)
 
         data_vars = {
             'system_index': (coord_names, nan_array.copy()),
             'orbital_period': (coord_names, nan_array.copy()),
             'peak_magnification': (coord_names, nan_array.copy()),
             'fwhm': (coord_names, nan_array.copy()),
-            'distance': (coord_names + ['survey'], zeros_array.copy()),
-            'volume': (coord_names + ['survey'], zeros_array.copy()),
-            'total_volume': (coord_names + ['survey'], zeros_array.copy()),
-            'flare_duration': (coord_names + ['survey'], zeros_array.copy()),
-            'flare_prob': (coord_names + ['survey'], zeros_array.copy()),
-            'duty_cycle': (coord_names + ['survey'], zeros_array.copy()),
-            'visit_prob': (coord_names + ['survey'], zeros_array.copy()),
-            'total_prob': (coord_names + ['survey'], zeros_array.copy()),
-            'visit_detections': (coord_names + ['survey'], zeros_array.copy()),
-            'total_detections': (coord_names + ['survey'], zeros_array.copy()),
-            'effective_volume': (coord_names + ['survey'], zeros_array.copy()),
+            'distance': (['survey'] + coord_names, zeros_array.copy()),
+            'volume': (['survey'] + coord_names, zeros_array.copy()),
+            'total_volume': (['survey'] + coord_names, zeros_array.copy()),
+            'flare_duration': (['survey'] + coord_names, zeros_array.copy()),
+            'flare_prob': (['survey'] + coord_names, zeros_array.copy()),
+            'duty_cycle': (['survey'] + coord_names, zeros_array.copy()),
+            'visit_prob': (['survey'] + coord_names, zeros_array.copy()),
+            'total_prob': (['survey'] + coord_names, zeros_array.copy()),
+            'visit_detections': (['survey'] + coord_names, zeros_array.copy()),
+            'total_detections': (['survey'] + coord_names, zeros_array.copy()),
+            'effective_volume': (['survey'] + coord_names, zeros_array.copy()),
         }
 
         # add the survey coordinate as well
@@ -216,6 +220,7 @@ class Grid:
                                         survey.apply_detection_statistics(self.simulator.syst)
                                     except Exception as e:
                                         print(e)
+                                        raise(e)
                                     if len(self.simulator.syst.flare_prob[survey.name]):
                                         flare_probs.append(max(self.simulator.syst.flare_prob[survey.name]))
                                 self.timing['apply stats'] += timer() - t1
@@ -225,29 +230,29 @@ class Grid:
 
                                 t1 = timer()
                                 s = self.simulator.syst  # shorthand
-                                data_vars['orbital_period'][1][lt, st, ml, ms, a, d] = s.orbital_period
+                                data_vars['orbital_period'][1][lt, st, ml, ms, a, d] = float(s.orbital_period)
                                 data_vars['peak_magnification'][1][lt, st, ml, ms, a, d] = max(s.magnifications)
-                                data_vars['fwhm'][1][lt, st, ml, ms, a, d] = s.fwhm
+                                data_vars['fwhm'][1][lt, st, ml, ms, a, d] = float(s.fwhm)
 
                                 for i, sur in enumerate(survey_names):
 
-                                    if len(s.distances[sur]):  # if not, leave zeros for all
-                                        data_vars['distance'][1][lt, st, ml, ms, a, d, i] = max(s.distances[sur])
-                                        data_vars['volume'][1][lt, st, ml, ms, a, d, i] = np.sum(s.volumes[sur])
-                                        data_vars['total_volume'][1][lt, st, ml, ms, a, d, i] = np.sum(s.total_volumes[sur])
-                                        data_vars['flare_duration'][1][lt, st, ml, ms, a, d, i] = max(s.flare_durations[sur])
-                                        data_vars['flare_prob'][1][lt, st, ml, ms, a, d, i] = max(s.flare_prob[sur])
+                                    if len(s.flare_prob[sur]):  # if not, leave zeros for all
+                                        data_vars['distance'][1][i, lt, st, ml, ms, a, d] = max(s.distances[sur])
+                                        data_vars['volume'][1][i, lt, st, ml, ms, a, d] = np.sum(s.volumes[sur])
+                                        data_vars['total_volume'][1][i, lt, st, ml, ms, a, d] = np.sum(s.total_volumes[sur])
+                                        data_vars['flare_duration'][1][i, lt, st, ml, ms, a, d] = max(s.flare_durations[sur])
+                                        data_vars['flare_prob'][1][i, lt, st, ml, ms, a, d] = max(s.flare_prob[sur])
                                         duty_cycle = max(s.flare_durations[sur]) / (s.orbital_period * 3600)
-                                        data_vars['duty_cycle'][1][lt, st, ml, ms, a, d, i] = duty_cycle
-                                        data_vars['visit_prob'][1][lt, st, ml, ms, a, d, i] = max(s.visit_prob[sur])
-                                        data_vars['total_prob'][1][lt, st, ml, ms, a, d, i] = max(s.total_prob[sur])
-                                        data_vars['visit_detections'][1][lt, st, ml, ms, a, d, i] = max(s.visit_detections[sur])
-                                        data_vars['total_detections'][1][lt, st, ml, ms, a, d, i] = max(s.total_detections[sur])
-                                        data_vars['effective_volume'][1][lt, st, ml, ms, a, d, i] = s.effective_volumes[sur]
+                                        data_vars['duty_cycle'][1][i, lt, st, ml, ms, a, d] = duty_cycle
+                                        data_vars['visit_prob'][1][i, lt, st, ml, ms, a, d] = max(s.visit_prob[sur])
+                                        data_vars['total_prob'][1][i, lt, st, ml, ms, a, d] = max(s.total_prob[sur])
+                                        data_vars['visit_detections'][1][i, lt, st, ml, ms, a, d] = max(s.visit_detections[sur])
+                                        data_vars['total_detections'][1][i, lt, st, ml, ms, a, d] = max(s.total_detections[sur])
+                                        data_vars['effective_volume'][1][i, lt, st, ml, ms, a, d] = s.effective_volumes[sur]
 
                                 if keep_systems:
-                                    self.simulator.syst.magnifications = None
-                                    self.simulator.syst.timestamps = None
+                                    # self.simulator.syst.magnifications = None
+                                    # self.simulator.syst.timestamps = None
                                     self.systems.append(self.simulator.syst)  # add this system to the list
                                     data_vars['system_index'][1][lt, st, ml, ms, a, d] = len(self.systems) - 1
 
@@ -402,12 +407,16 @@ class Grid:
         if self.dataset is None:
             raise ValueError('Must have a dataset first!')
         ds = self.dataset
-        dec = ds.declination * np.pi / 180
-        dec_step = dec[1] - dec[0]  # do something more complicated if uneven steps
-        new_ev = (ds.effective_volume * np.cos(dec) * dec_step).sum(dim='declination')
+        dec = ds.declination * np.pi / 180  # convert to radians
+        # dec_step = dec[1] - dec[0]  # do something more complicated if uneven steps
+        dec_step = np.diff(dec)  # each dec value accounts for the range of declinations back down to previous point
+        new_ev = ds.effective_volume.isel(declination=slice(1, None))
+        new_ev = (new_ev * np.cos(dec[1:]) * dec_step).sum(dim='declination')
         new_ev.attrs['name'] = 'effective_volume'
         new_ev.attrs['long_name'] = 'Effective volume'
         new_ev.attrs['units'] = 'pc^3'
+        ds['marginalized_volume'] = new_ev
+
         return new_ev
 
     def get_probability_density(self, lens_temp=0, star_temp=0, lens_mass=0, star_mass=0, sma=0):
@@ -425,7 +434,7 @@ class Grid:
         space density of binaries required
         to make a detection.
         Alternatively, multiply the sum
-        by the space density to get
+        by a model space density to get
         the total number of expected
         detections.
 
@@ -472,6 +481,8 @@ class Grid:
                 par = 0  # convert to flat density
 
             if not hasattr(par, '__len__'):
+                if np.all(data == 0):
+                    return xr.ones_like(data.astype(float))
                 return data.astype(float) ** float(par)  # use a power law
             if type(par) == xr.DataArray:
                 return par  # return this directly
@@ -546,9 +557,9 @@ class Grid:
         if sma == 'mid':
             sma = -1.3
         elif sma == 'low':
-            sma = -1.0
-        elif sma == 'high':
             sma = -1.5
+        elif sma == 'high':
+            sma = -1.0
         else:
             raise ValueError(f'Unknown option "{sma}". Use "low", "high" or "mid".')
 
@@ -650,11 +661,21 @@ if __name__ == "__main__":
         survey_name = sys.argv[1].upper()
     else:
         survey_name = 'all_surveys'
+        # survey_name = 'ZTF'
 
     if len(sys.argv) > 2:
-        demo_mode = sys.argv[2].upper()
+        lens_type = sys.argv[2]
+    else:
+        lens_type = 'BH'
+
+    if len(sys.argv) > 3:
+        demo_mode = sys.argv[3].upper()
     else:
         demo_mode = 'DEMO'
+
+    if lens_type not in ['WD', 'BH']:
+        raise ValueError('Value of "lens_type" must be "WD" or "BH". '
+                         f'Instead got "{lens_type}".')
 
     if demo_mode not in ['DEMO', 'FULL']:
         raise ValueError('Value of "demo_mode" must be "DEMO" or "REAL". '
@@ -662,30 +683,31 @@ if __name__ == "__main__":
 
     print(f'Running {demo_mode} simulation for survey: {survey_name}')
 
-    g = Grid()
+    g = Grid(wd_lens=lens_type == 'WD')
     if demo_mode == 'DEMO':
-        g.setup_demo_scan()
+        g.setup_demo_scan(wd_lens=lens_type == 'WD')
 
     if survey_name != 'all_surveys':
         g.surveys = [survey.Survey(survey_name)]
 
-    g.run_simulation()
-    # g.summarize()
-    prob = g.get_probability_density()
+    g.run_simulation(keep_systems=demo_mode == 'DEMO')
+
+    ev = g.marginalize_declinations()
+
+    # make a probability distribution that is flat in semimajor axis space
+    prob_flat = g.get_probability_density(lens_temp=-2, star_temp=-2, lens_mass=(0.6, 0.2), star_mass=(0.6, 0.2))
+    g.dataset['probability_density_flat'] = prob_flat
+    prob = g.get_default_probability_density()
     total_vol = float(g.get_total_volume())
     print(f'total volume: {total_vol:.1f}pc^3')
     # g.datset = xr.load_dataset('saved/grid_data.nc')
-    # ev = g.marginalize_declinations()
+    print(g.timing)
 
-    # ds = g.dataset
-    # ds.sel(star_temp=10000, lens_temp=10000, lens_mass=0.6, star_mass=0.6).isel(declination=0).effective_volume.plot(hue='survey', marker='*')
-    # plt.xscale('log')
-    # plt.yscale('log')
-
-    try:
-        os.mkdir('saved')
-    except FileExistsError:
-        pass
+    ds = g.dataset
 
     if demo_mode == 'FULL':
-        g.dataset.to_netcdf(f'saved/simulate_{survey_name}.nc')
+        try:
+            os.mkdir('saved')
+        except FileExistsError:
+            pass
+        g.dataset.to_netcdf(f'saved/simulate_{survey_name}_{lens_type}.nc')

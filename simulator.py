@@ -395,14 +395,13 @@ class Simulator:
         center_idx = len(lc) // 2
         peak_idx = np.argmax(lc[center_idx:]) + center_idx
         peak = lc[peak_idx]
-
+        half_idx = peak_idx
         for i in range(peak_idx, len(lc)):
             if lc[i] < 0.5 * peak:
                 half_idx = i
                 break
 
         # TODO: add interpolation
-
 
         return 2 * (ts[half_idx] - ts[center_idx])
 
