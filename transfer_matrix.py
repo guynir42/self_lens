@@ -5,6 +5,7 @@ from datetime import datetime
 from timeit import default_timer as timer
 import scipy.special
 import skimage.morphology
+import skimage.transform
 
 """
 This module generates the core (radial) lightcurves and offsets
@@ -1125,15 +1126,11 @@ def single_geometry(
         resolution = [resolution]
     else:  # separate images
         (im, x_grid, y_grid, resolution) = make_surface_one_image(z1x, z1y, pixels=pixels)
-        im = [im]
-        x_grid = [x_grid]
-        y_grid = [y_grid]
-        resolution = [resolution]
         (im2, x_grid2, y_grid2, resolution2) = make_surface_one_image(z2x, z2y, pixels=pixels)
-        im.append(im2)
-        x_grid.append(x_grid2)
-        y_grid.append(y_grid2)
-        resolution.append(resolution2)
+        im = [im, im2]
+        x_grid = [x_grid, x_grid2]
+        y_grid = [y_grid, y_grid2]
+        resolution = [resolution, resolution2]
 
     mag = 0
     offset = 0
@@ -1147,9 +1144,25 @@ def single_geometry(
 
     if plotting:
         if len(im) > 1:
-            fig, (ax1, ax2) = plt.subplots(1, 2)
-            plot_geometry(im[0], x_grid[0], y_grid[0], source_radius, distance, occulter_radius, mag, offset, axes=ax1, legend=False)
-            plot_geometry(im[1], x_grid[1], y_grid[1], source_radius, distance, occulter_radius, mag, offset, axes=ax2, legend=True)
+            # figure out new axes and grid
+            left = min(x_grid[0][0, :])
+            right = max(x_grid[1][0, :])
+            # top = max(y_grid[1][:, 0])
+            width = int(np.ceil((right - left) * resolution[1]) + 1)
+            # height = int(np.ceil(top * resolution[0]) + 1)
+            x_axis = np.linspace(left, right, width, endpoint=True)
+            # y_axis = np.linspace(0, top, height, endpoint=True)
+            y_axis = y_grid[1][:, 0]  # just use the existing grid
+            x_grid_new = np.repeat(np.expand_dims(x_axis, 0), y_axis.size, axis=0)
+            y_grid_new = np.repeat(np.expand_dims(y_axis, 1), x_axis.size, axis=1)
+            padding = x_grid_new.shape[1] - x_grid[1].shape[1]
+            im_new = np.pad(im[1], ((0, 0), (padding, 0)))
+            im_small = skimage.transform.rescale(im[0], resolution[1] / resolution[0])
+            im_small = np.pad(
+                im_small,
+                ((0, im_new.shape[0] - im_small.shape[0]), (0, im_new.shape[1] - im_small.shape[1])),
+            )
+            plot_geometry(im_new+im_small, x_grid_new, y_grid_new, source_radius, distance, occulter_radius, mag, offset)
         else:
             plot_geometry(im[0], x_grid[0], y_grid[0], source_radius, distance, occulter_radius, mag, offset)
 
@@ -1292,6 +1305,7 @@ def plot_geometry(
     if axes is None:
         axes = plt.gca()
 
+    axes.cla()
     num_points = int(num_points)
     im_left = np.min(x_grid)
     im_right = np.max(x_grid)
@@ -1349,11 +1363,18 @@ def plot_geometry(
 
     if legend:
         axes.set(
-            xlabel=f"d= {distance:.2f} | source r= {source_radius} "
-                   f"| occulter r= {occulter_radius} | mag= {mag:.2f} | offset= {offset:.2f}"
+            title=f"d= {distance:.2f} | source r= {source_radius} "
+                   f"| occulter r= {occulter_radius} | mag= {mag:.2f} | offset= {offset:.2f}",
+            xlabel='distance from lens center [Einstein radii]',
+            position=[0.1, 0.125, 0.6, 0.8],
         )
-        axes.legend(bbox_to_anchor=(1.04, 0.0), loc="lower left")
-
+        axes.legend(bbox_to_anchor=(1.04, 0.0), loc="lower left", fontsize=14)
+        axes.xaxis.label.set_fontsize(14)
+        [l.set_fontsize(14) for l in axes.get_xticklabels()]
+        [l.set_fontsize(14) for l in axes.get_yticklabels()]
+        axes.title.set_position([0.0, 0.0, 1, 1])
+        axes.title.set_horizontalalignment('left')
+        axes.title.set_fontsize(14)
     if pause_time:
         plt.show()
         plt.pause(pause_time)
