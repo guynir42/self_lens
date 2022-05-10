@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 
 sys.path.append(path.dirname(path.abspath(__file__)))
 
+import grid_scan
 import simulator
 import survey
 
@@ -177,5 +178,65 @@ def test_probabilities(sim, ztf):
     assert abs(sim.syst.flare_prob['ZTF'][0] - 0.5) < 0.2  # close to 50% detection
     assert 1 - sim.syst.visit_prob['ZTF'][0] < 0.2
     assert sim.syst.num_detections['ZTF'][0] > 1  # should be able to see multiple flares
+
+
+def test_grid_scan(grid):
+    # grid.run_simulation(keep_systems=False)
+    ds = grid.dataset.isel(lens_temp=0, star_temp=0, lens_mass=0, star_mass=0)
+
+    for s in ds.survey.values:
+
+        for i, d in enumerate(ds.declination.values):
+            prev_ev = 0
+            prev_a = 0
+            rising_phase = True
+            for j, a in enumerate(ds.semimajor_axis.values):
+                if a < 0.1:  # very small separations are problematic because of eclipses
+                    continue
+                ev = float(ds.isel(declination=i, semimajor_axis=j).sel(survey=s).effective_volume.values)
+                if ev > prev_ev:
+                    if not rising_phase:
+                        message = f'Volume increase of {(ev-prev_ev)/ev * 100:.1f}% ' \
+                                  f'at sma= {prev_a}->{a} and dec= {d} for {s}.'
+
+                        print(message)
+                        ds.isel(declination=i).sel(survey=s).effective_volume.plot(marker='*', hue=survey)
+                        plt.plot([a, a], [0, max(ds.isel(declination=i).sel(survey=s).effective_volume)], '--')
+                        plt.xscale('log')
+                        plt.yscale('log')
+                        plt.show(block=True)
+                        raise ValueError(message)
+                else:  # once done rising, can no longer allow any more increases
+                    rising_phase = False
+                prev_ev = ev
+                prev_a = a
+
+        for j, a in enumerate(ds.semimajor_axis.values):
+            if a < 0.1:  # very small separations are problematic because of eclipses
+                continue
+            prev_ev = np.inf
+            prev_d = 0
+            rising_phase = 0
+            for i, d in enumerate(ds.declination.values):
+                ev = float(ds.isel(declination=i, semimajor_axis=j).sel(survey=s).effective_volume.values)
+                if ev > prev_ev:
+                    if rising_phase == 0:
+                        rising_phase = 1
+                    if rising_phase > 1:
+                        message = f'Volume increase of {(ev - prev_ev) / ev * 100:.1f}% ' \
+                                  f'at sma= {a} and dec= {prev_d}->{d} for {s}.'
+
+                        print(message)
+                        ds.isel(semimajor_axis=j).sel(survey=s).effective_volume.plot(marker='*', hue=survey)
+                        plt.plot([d, d], [0, max(ds.isel(semimajor_axis=j).sel(survey=s).effective_volume)], '--')
+                        plt.xscale('log')
+                        plt.yscale('log')
+                        plt.show(block=True)
+                        raise ValueError(message)
+                elif rising_phase == 1:
+                    rising_phase = 2
+
+                prev_ev = ev
+                prev_d = d
 
 

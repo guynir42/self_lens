@@ -393,7 +393,7 @@ class Simulator:
         ts = self.timestamps
 
         center_idx = len(lc) // 2
-        peak_idx = np.argmax(lc[center_idx:]) + center_idx
+        peak_idx = np.argmax(lc[center_idx:]) + center_idx  # first peak from center
         peak = lc[peak_idx]
         half_idx = peak_idx
         for i in range(peak_idx, len(lc)):
@@ -401,9 +401,16 @@ class Simulator:
                 half_idx = i
                 break
 
-        # TODO: add interpolation
+        # half_idx must be bigger than peak_idx
+        t1 = ts[half_idx - 1]
+        t2 = ts[half_idx]
+        l1 = lc[half_idx - 1]
+        l2 = lc[half_idx]
+        t_flare = t1 + (0.5 * peak - l1) / (l2 - l1) * (t2 - t1)  # linear interpolation
+        t_flare *= 2  # symmetric lightcurve
 
-        return 2 * (ts[half_idx] - ts[center_idx])
+        return t_flare
+        # return 2 * (ts[half_idx] - ts[center_idx])
 
     def length_scale_estimate(self, precision=0.01, threshold=3):
         """

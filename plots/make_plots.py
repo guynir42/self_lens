@@ -2,6 +2,7 @@ import os
 import sys
 from os import path
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 
 import xarray as xr
@@ -217,13 +218,13 @@ plt.savefig('plots/photometric_precision.pdf')
 plt.savefig('plots/photometric_precision.png')
 
 
-## load the grid scan results for all surveys
+## load the grid scan results for all surveys for WDs
 
 survey_names = ['ZTF', 'TESS', 'LSST', 'CURIOS', 'CURIOS_ARRAY', 'LAST']
 
 ds = None
 for survey in survey_names:
-    filename = f'/home/guyn/timeseries/self_lens/saved/simulate_{survey}.nc'
+    filename = f'/home/guyn/timeseries/self_lens/saved/simulate_{survey}_WD.nc'
     new_ds = xr.load_dataset(filename, decode_times=False)
     for name in ['lens_temp', 'star_temp']:
         new_ds[name] = np.round(new_ds[name])
@@ -243,10 +244,10 @@ ds.flare_duration.sel(
     survey=['TESS', 'LSST', 'CURIOS']
 ).isel(
     semimajor_axis=[50, 65],
-    declination=slice(0, 30)
+    declination=slice(0, 120)
 ).plot(col='semimajor_axis', hue='survey', marker='*', figsize=[14, 6])
 
-# plt.yscale('log')
+plt.xscale('log')
 
 ## save the plot
 
@@ -265,12 +266,9 @@ plt.savefig('plots/duration_vs_declination.png')
 ## show the simulation results for semimajor axis using a flat WD model and compare to real sma WD model
 
 
-## show how the declination dies out at two distances for different surveys
+## sensitivity is the inverse of effective volume
 
 import grid_scan
-
-# mass = 0.6
-# temp = 16000
 
 plt.clf()
 fig, axes = plt.subplots(num=10, figsize=[10, 6])
@@ -278,18 +276,6 @@ fig, axes = plt.subplots(num=10, figsize=[10, 6])
 surveys = ['TESS', 'CURIOS', 'LSST', 'CURIOS_ARRAY']
 markers = ['x', 'v', '*', '^', 's']
 sens = 1 / (ds.marginalized_volume * ds.probability_density_flat).sum(dim=['lens_mass', 'star_mass', 'lens_temp', 'star_temp'])
-# sens = 1 / ds.marginalized_volume
-
-# sens = sens.sel(
-#     lens_mass=mass,
-#     star_mass=0.6,
-#     star_temp=temp,
-#     lens_temp=8000,
-#     survey=surveys,
-# ).isel(
-# sens = sens.isel(
-#     semimajor_axis=slice(0, 65)
-# )
 
 sma = sens.semimajor_axis.values
 
@@ -307,11 +293,7 @@ space_density = 0.0055  # WDs per pc^3
 binary_fraction = 0.1
 prob = {}
 for m in ['mid', 'low', 'high']:
-    # model = g.get_default_probability_density(temp=m, mass=m, sma=m).sel(
-    #     lens_mass=mass,
-    #     star_mass=0.6,
-    #     star_temp=temp,
-    #     lens_temp=8000,
+
     model = g.get_default_probability_density(temp=m, mass=m, sma=m).sum(
         dim=[
             'star_mass',
@@ -319,9 +301,6 @@ for m in ['mid', 'low', 'high']:
             'star_temp',
             'lens_temp',
         ])
-    # ).isel(
-    #     semimajor_axis=slice(0, 65)
-    # )
     prob[m] = model.values * space_density * binary_fraction
 
 axes.fill_between(sma, prob['low'], prob['high'], color='k', alpha=0.3, label=f'WD model')
@@ -339,7 +318,7 @@ axes.set_xscale('log')
 axes.set_xlabel('Semimajor axis [AU]', fontsize=14)
 axes.set_ylabel('WD binary density [pc$^{-3}$]', fontsize=14)
 
-period = lambda x: x ** (2 / 3) * 365.25
+period = lambda x: x ** (3 / 2) * 365.25
 ax2 = axes.twiny()
 ax2.set_xlabel('Period [days]', fontsize=14)
 ax2.set_xlim([period(x) for x in axes.get_xlim()])
@@ -352,11 +331,13 @@ plt.show()
 plt.savefig('plots/sensitivity_vs_model.pdf')
 plt.savefig('plots/sensitivity_vs_model.png')
 
-## show the effective volume vs the density (reciprocal of the sensitivity)
+## show the effective volume vs the density (reciprocal of the sensitivity) for WDs
 
-fig, axes = plt.subplots(num=11, figsize=[10, 6])
+# assume ds has white dwarf data
+
+fig, axes = plt.subplots(num=11, figsize=[12, 8])
 fig.clf()
-fig, axes = plt.subplots(num=11, figsize=[10, 6])
+fig, axes = plt.subplots(num=11, figsize=[12, 8])
 
 surveys = ['TESS', 'CURIOS', 'LSST', 'CURIOS_ARRAY']
 markers = ['x', 'v', '*', '^', 's']
@@ -371,16 +352,16 @@ for i, s in enumerate(surveys):
     axes.plot(sma, ev_curve[s], label=s, marker=markers[i])
 
 
+axes.set_ylim((1e-3, 1e7))
+axes.set_xlim((8e-3, 15))
+
 axes.set_yscale('log')
 axes.set_xscale('log')
 
 axes.set_xlabel('Semimajor axis [AU]', fontsize=14)
 axes.set_ylabel('effective volume [pc$^3$]', fontsize=14)
 
-axes.set_ylim((1e-3, 2e4))
-axes.set_xlim((5e-3, 10))
-
-period = lambda x: x ** (2 / 3) * 365.25
+period = lambda x: x ** (3 / 2) * 365.25
 ax2 = axes.twiny()
 ax2.set_xlabel('Period [days]', fontsize=14)
 ax2.set_xlim([period(x) for x in axes.get_xlim()])
@@ -393,6 +374,13 @@ need_volume = 1 / (space_density * binary_fraction)
 axes.plot(sma, np.ones(sma.shape) * need_volume, '--', label=f'1 DWD per {int(need_volume)} pc$^3$')
 axes.legend(loc='upper right', fontsize=14, framealpha=1)
 
+# following https://stackoverflow.com/questions/44078409/matplotlib-semi-log-plot-minor-tick-marks-are-gone-when-range-is-large
+locmaj = matplotlib.ticker.LogLocator(base=10, numticks=12)
+axes.yaxis.set_major_locator(locmaj)
+locmin = matplotlib.ticker.LogLocator(base=10.0, subs=(0.2, 0.4, 0.6, 0.8), numticks=12)
+axes.yaxis.set_minor_locator(locmin)
+axes.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+
 plt.show()
 
 
@@ -401,4 +389,97 @@ plt.show()
 plt.savefig('plots/effective_volume.pdf')
 plt.savefig('plots/effective_volume.png')
 
+## load the grid scan results for all surveys for BHs
 
+survey_names = ['TESS', 'LSST', 'CURIOS', 'CURIOS_ARRAY']
+
+ds = None
+for survey in survey_names:
+    filename = f'/home/guyn/timeseries/self_lens/saved/simulate_{survey}_BH.nc'
+    new_ds = xr.load_dataset(filename, decode_times=False)
+    for name in ['lens_temp', 'star_temp']:
+        new_ds[name] = np.round(new_ds[name])
+
+    if ds is None:
+        ds = new_ds
+    else:
+        ds = xr.concat([ds, new_ds], dim='survey')
+
+## show the effective volume vs the density (reciprocal of the sensitivity) for BHs
+
+# assume ds has black hole data
+
+import matplotlib
+
+fig, axes = plt.subplots(num=11, figsize=[12, 8])
+fig.clf()
+fig, axes = plt.subplots(num=11, figsize=[12, 8])
+
+surveys = ['TESS', 'CURIOS', 'LSST', 'CURIOS_ARRAY']
+markers = ['x', 'v', '*', '^', 's']
+ev = (ds.marginalized_volume * ds.probability_density).sum(dim=['lens_mass', 'star_mass', 'lens_temp', 'star_temp'])
+sma = ev.semimajor_axis.values
+
+ev_curve = {}
+min_sma = np.inf
+for i, s in enumerate(surveys):
+    ev_curve[s] = ev.sel(survey=s).values
+    min_sma = min(min_sma, sma[np.argmin(ev_curve[s] > 0)])
+    axes.plot(sma, ev_curve[s], label=s, marker=markers[i])
+
+
+axes.set_ylim((1e-7, 1e8))
+# axes.set_xlim((8e-3, 15))
+
+axes.set_yscale('log')
+axes.set_xscale('log')
+
+axes.set_xlabel('Semimajor axis [AU]', fontsize=14)
+axes.set_ylabel('effective volume [pc$^3$]', fontsize=14)
+
+period = lambda x: x ** (3 / 2) * 365.25 * 24  # hours (using Kepler's law)
+ax2 = axes.twiny()
+ax2.set_xlabel('Period [hours]', fontsize=14)
+ax2.set_xlim([period(x) for x in axes.get_xlim()])
+ax2.set_xscale('log')
+
+# following https://stackoverflow.com/questions/44078409/matplotlib-semi-log-plot-minor-tick-marks-are-gone-when-range-is-large
+locmaj = matplotlib.ticker.LogLocator(base=10, numticks=12)
+axes.yaxis.set_major_locator(locmaj)
+locmin = matplotlib.ticker.LogLocator(base=10.0, subs=(0.2, 0.4, 0.6, 0.8), numticks=12)
+axes.yaxis.set_minor_locator(locmin)
+axes.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+
+ax3 = axes.twinx()
+ax3.set_ylabel('Flare FWHM [seconds]', fontsize=14)
+# ax3.set_xlim([period(x) for x in axes.get_xlim()])
+ax3.set_yscale('log')
+
+# fwhm1 = ds.fwhm.sel(star_mass=0.6).isel(lens_mass=0, declination=0, lens_temp=0, star_temp=0, survey=0)
+# fwhm2 = ds.fwhm.sel(star_mass=0.6).isel(lens_mass=-1, declination=0, lens_temp=0, star_temp=0, survey=0)
+s_low = simulator.Simulator()
+s_high = simulator.Simulator()
+
+fwhm1 = []
+fwhm2 = []
+for a in sma:
+    s_low.timestamps = None
+    s_low.calculate(star_mass=0.6, lens_mass=min(ds.lens_mass.values), semimajor_axis=a, declination=0, star_temp=8000, lens_temp=0)
+    fwhm1.append(s_low.fwhm)
+
+    s_high.timestamps = None
+    s_high.calculate(star_mass=0.6, lens_mass=max(ds.lens_mass.values), semimajor_axis=a, declination=0, star_temp=8000, lens_temp=0)
+    fwhm2.append(s_high.fwhm)
+
+ax3.fill_between(sma, fwhm1, fwhm2, color='k', alpha=0.3)
+
+axes.fill_between([np.nan, np.nan], [np.nan, np.nan], color='k', alpha=0.3, label='Flare FWHM range')
+axes.legend(loc='lower right', fontsize=14, framealpha=1)
+
+plt.show()
+
+
+## save the plot
+
+plt.savefig('plots/effective_volume_BH.pdf')
+plt.savefig('plots/effective_volume_BH.png')

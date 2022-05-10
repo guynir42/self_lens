@@ -215,9 +215,10 @@ class Survey:
             # p *= self.threshold
             if np.all(det_lc > p):
                 # this should not happen in general, if there are enough points outside the flare
-                raise ValueError('All lightcurve points are above precision level!')
+                # raise ValueError('All lightcurve points are above precision level!')
                 # print('All lightcurve points are above precision level!')
                 # end_idx = len(det_lc) - 1
+                flare_time_per_distance.append(ts[-1]-ts[0])
             elif np.all(det_lc < p):
                 flare_time_per_distance.append(0)
             else:
@@ -339,6 +340,8 @@ class Survey:
         # choose the detection method depending on the flare time and exposure time
         # the snr represents the probability to detect a single flare (ignoring periodicity),
         # assuming the flare occured inside the time span of the series
+
+        multiplicative_factor = 1  # the S/N values are the only valid probability points
         if best_t_flare * 10 < t_exp:  # flare is much shorter than exposure time
             signal = np.sum(lc[1:] * np.diff(ts))  # total signal in flare (skip 1st bin of LC to multiply with diff)
             noise = t_exp * best_precision  # total noise in exposure
@@ -355,23 +358,25 @@ class Survey:
 
         else:  # all other cases require sliding window
             dt = ts[1] - ts[0]  # assume timestamps are uniformly sampled in the simulated LC
-            N_exp = int(np.ceil(t_exp / dt))  # number of time steps in single exposure
+            N_exp = max(1, int(np.round(t_exp / dt)))  # number of time steps in single exposure
             single_exposure_snr = np.convolve(lc, np.ones(N_exp), mode='same') / N_exp / best_precision
             # coverage = dt * len(single_exposure_snr)  # all points with non-zero S/N have prob>0
 
             if self.series_length == 1:
                 snr = single_exposure_snr
-                multiplicative_factor = 1  # the S/N values are the only valid probability points
             else:
                 # Need to calculate the matched-filter result for several exposures.
                 # go over the single-image response and convolve that
                 # with the addition of multiple values from separate exposures
-                N_btw = int(np.ceil((t_exp + t_dead) / dt))  # number of steps between repeat exposures
-                N_flare = int(np.ceil(best_t_flare / dt))
+                N_btw = int(np.round((t_exp + t_dead) / dt))  # number of steps between repeat exposures
+                N_btw = max(N_btw, 1)
+                N_flare = int(np.round(best_t_flare / dt))
+                N_flare = max(N_flare, 1)
                 N_filter = min(N_flare * 5, int(N_btw * self.series_length))  # number of steps in filter
+                N_filter = max(N_filter, 1)
                 # if we only sample probabilities from a subset of the series
                 # then we must increase the total prob*dt later
-                multiplicative_factor = N_filter * dt / t_series
+                multiplicative_factor = int(N_btw * self.series_length) / N_filter
 
                 # the filter samples the mid exposure with the correct dead time
                 matched_filter = np.zeros(N_filter)
@@ -383,7 +388,7 @@ class Survey:
             # coverage = min(coverage, period)  # coverage cannot exceed period (when series is longer, see below)
 
         if plotting:
-            print(f'Flare duration= {best_t_flare:.2f}s | coverage= {coverage:.2f}s')
+            print(f'Flare duration= {best_t_flare:.2f}s | dt= {dt:.2f}s')
             plt.clf()
             plt.plot(ts, lc, '-x', label='Raw magnification')
             if snr.shape == (1,):
@@ -407,38 +412,34 @@ class Survey:
         # find the average probability to make a detection, and the average number of detections
         # now we must add the probability of a flare to be inside the span of the series
         # and account for multiple flares inside the series
-        if t_series < period:  # assume survey hits random phases of the orbit every time
-            # mean_prob = np.mean(prob, axis=1)  # average the probability over multiple time shifts
-            #
-            # # dilute the det. prop. by the duty cycle (all the time the exposure may have been outside the event)
-            # mean_prob *= coverage / period
 
-            # the probability for each time step dt
-            # (or entire series, if uniform probability)
-            # is summed to give the total probability
-            # divide by the period to get the real prob
-            # including the condition that flare is inside
-            # each of the dt ranges
-            mean_prob = np.sum(prob, axis=1) * dt / period
+        # the probability for each time step dt
+        # (or entire series, if uniform probability)
+        # is summed to give the total probability
+        # divide by the period to get the real prob
+        # including the condition that flare is inside
+        # each of the dt ranges
+        mean_prob = np.sum(prob, axis=1) * dt / period * multiplicative_factor
+        mean_prob = np.minimum(mean_prob, 1.0)  # cannot exceed 1, although this should never happen
+        # there's no way to see more than one flare in this series,
+        # so the average number of detections is just the probability to see one
+        num_detections = mean_prob
 
-            # there's no way to see more than one flare in this series,
-            # so the average number of detections is just the probability to see one
-            num_detections = mean_prob
-
-        else:  # assume full coverage in a single series
+        if t_series > period:  # entire orbit is covered by the series
             # if the flare occurs multiple times in a single visit/series, we must account for the fact
             # that the number of flares in the series is between N and N+1 (depending on fraction of period)
             num_flares_in_series = t_series // period
             fraction = t_series % period / period  # fraction of period after num_flares were seen
 
+            num_detections = mean_prob * (num_flares_in_series + fraction)  # average of N and N+1 with weight
+
             # a simplifying assumption that for multiple flares in a series,
             # the peak_prob is the same for each flare.
-            prob1 = 1 - (1 - peak_prob) ** num_flares_in_series  # at least one detection
-            prob2 = 1 - (1 - peak_prob) ** (num_flares_in_series + 1)  # at least one detection
+            prob1 = 1 - (1 - mean_prob) ** num_flares_in_series  # at least one detection
+            prob2 = 1 - (1 - mean_prob) ** (num_flares_in_series + 1)  # at least one detection
             mean_prob = prob1 * (1 - fraction) + prob2 * fraction  # weighted average of the two options
 
             # to count the average number of detections assume each detection has the same (peak) probability
-            num_detections = peak_prob * (num_flares_in_series + fraction)  # average of N and N+1 with weight
 
         return peak_prob, mean_prob, num_detections
 

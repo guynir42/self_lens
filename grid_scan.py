@@ -55,17 +55,16 @@ class Grid:
         if wd_lens:
             self.lens_masses = self.star_masses
             self.lens_temperatures = self.star_temperatures
-            self.semimajor_axes = np.geomspace(1e-3, 10, 100)
-            self.declinations = np.linspace(0, 1.0, 201)
+            self.semimajor_axes = np.geomspace(1e-2, 10, 100)
+            # self.declinations = np.linspace(0, 1.0, 201)
+            self.declinations = np.geomspace(1e-3, 5, 100)
 
         else:
             self.lens_masses = np.arange(5.0, 30, 5)
             self.lens_temperatures = [0]
             self.semimajor_axes = np.geomspace(1e-4, 1, 100)
-            self.declinations = np.linspace(0, 3.0, 501)
-
-        self.declinations = np.linspace(0, 3.0, 301)
-        # self.declinations = np.geomspace(1e-5, 5, 100)
+            # self.declinations = np.linspace(0, 3.0, 501)
+            self.declinations = np.geomspace(1e-3, 45, 100)
 
         # print(f'Total number of parameters: {self.get_num_parameters()}')
 
@@ -90,13 +89,17 @@ class Grid:
         if wd_lens:
             self.lens_masses = self.star_masses
             self.lens_temperatures = self.star_temperatures
+            self.semimajor_axes = np.geomspace(1e-2, 10, 100)
+            self.declinations = np.geomspace(1e-3, 5, 200)
         else:
             self.lens_masses = np.round(np.arange(1.5, 30, 0.5), 2)
             self.lens_temperatures = np.array([0])
+            self.semimajor_axes = np.geomspace(1e-4, 1, 100)
+            self.declinations = np.geomspace(1e-3, 45, 200)
 
-        self.semimajor_axes = np.geomspace(1e-3, 10, 100)
+        # self.semimajor_axes = np.geomspace(1e-3, 10, 100)
         # self.declinations = np.linspace(0, 90, 90001)
-        self.declinations = np.linspace(0, 1.0, 201)
+        # self.declinations = np.linspace(0, 1.0, 201)
         # self.declinations = np.geomspace(1e-5, 5, 10000)
 
         # print(f'Total number of parameters: {self.get_num_parameters()}')
@@ -111,6 +114,7 @@ class Grid:
             survey.Survey('LSST'),
             survey.Survey('TESS'),
             survey.Survey('CURIOS'),
+            survey.Survey('CURIOS_ARRAY'),
             # survey.Survey('LAST'),
         ]
 
