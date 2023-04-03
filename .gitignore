@@ -4,6 +4,8 @@ saved/fragments
 saved/*
 scripts/*.npz
 scripts/*.txt
+plots/*
+archive/*
 .idea
 
 # Byte-compiled / optimized / DLL files

@@ -22,29 +22,180 @@ os.chdir(folder)
 ## start by loading a matrix:
 T = transfer_matrix.TransferMatrix.from_file(folder+'/matrix.npz')
 
-## plot some example images
+## show a few geometries at different distances (also saves the plots!)
 
-fig, (ax1, ax2, ax3) = plt.subplots(1, 3, num=10)
+fig = plt.figure(num=0, figsize=[12, 6])
 
-# TODO: need to get unified single map for both images together, and pass the legend argument into single_geometry.
+distances = np.linspace(0, 5, 20)
+for i, d in enumerate(distances):
+    transfer_matrix.single_geometry(distance=d, source_radius=0.8, occulter_radius=0.25, plotting=True, legend=True)
+    plt.show()
+    plt.pause(0.2)
 
-plt.sca(ax1)
-transfer_matrix.single_geometry(source_radius=0.8, distance=0, occulter_radius=0, plotting=True, legend=False)
+    plt.savefig(f'plots/geometry_{i}.pdf')
+    plt.savefig(f'plots/geometry_{i}.png')
 
-plt.sca(ax2)
-transfer_matrix.single_geometry(source_radius=0.8, distance=0.4, occulter_radius=0, plotting=True, legend=False)
+## show three geometries on one figure
 
-plt.sca(ax3)
-transfer_matrix.single_geometry(source_radius=0.8, distance=1.6, occulter_radius=0, plotting=True, legend=True)
+fig, axes = plt.subplots(1, 3, figsize=[12, 4])
+distances = [0, 0.75, 1.05]
 
+for i, d in enumerate(distances):
+    transfer_matrix.single_geometry(
+        distance=d,
+        source_radius=0.8,
+        occulter_radius=0.25,
+        plotting=True,
+        legend=False,
+        axes=axes[i],
+        left=-2.0+0.6*d,
+        right=2.0+0.6*d,
+        top=1.5,
+    )
+    axes[i].set_title(f'Separation= {d}')
+    if i != 1:
+        axes[i].set_xlabel('')
+    # if i > 0:
+    axes[i].set_yticklabels([])
+
+axes[0].set_position([0.05, 0.1, 0.225, 0.8])
+axes[1].set_position([0.30, 0.1, 0.225, 0.8])
+axes[2].set_position([0.55, 0.1, 0.225, 0.8])
+axes[2].legend(bbox_to_anchor=(1.05, 1.05), loc="upper left", fontsize=14)
+
+## save the figure
+
+plt.savefig('plots/multiple_geometries.pdf')
+plt.savefig('plots/multiple_geometries.png')
+
+## show a simple lightcurve for a few parameter values
+
+distances = np.linspace(0, 2.0, 20)
+# occulters = [0, 0.85, 1.0, 1.2]
+sources = [0.25, 0.5, 1.0, 2.0]
+mag = []
+for i, s in enumerate(sources):
+    mag.append(transfer_matrix.radial_lightcurve(distances=distances, source_radius=s, occulter_radius=0))
+
+
+## plot these
+
+fig = plt.figure(num=1.0, figsize=[12, 6])
+fig.clf()
+# markers = ['*', 'v', 's', 'o', 's', 'x']
+line_styles = ['-', '--', '-.', ':']
+for i, s in enumerate(sources):
+    plt.plot(distances, mag[i], lw=4.0, ms=10, marker=None,
+             ls=line_styles[i], fillstyle='full', label=f'{s:.2f}')
+
+plt.legend(fontsize=24, title='source radius', title_fontsize=22)
+plt.xlabel('Source-lens distance [Einstein radii]', fontsize=24)
+plt.ylabel('magnification', fontsize=24)
+[l.set_fontsize(24) for l in plt.gca().get_xticklabels()]
+[l.set_fontsize(24) for l in plt.gca().get_yticklabels()]
+
+plt.gca().set_position([0.1, 0.15, 0.85, 0.8])
+plt.show()
+
+## save the plots
+plt.savefig('plots/example_lcs_sources.pdf')
+plt.savefig('plots/example_lcs_sources.png')
+
+## show a simple lightcurve for a few parameter values
+
+distances = np.linspace(0, 2.0, 20)
+occulters = [0, 0.85, 1.0, 1.2]
+source = 0.5
+mag = []
+for i, occ in enumerate(occulters):
+    mag.append(transfer_matrix.radial_lightcurve(distances=distances, source_radius=source, occulter_radius=occ))
+
+## plot these
+
+fig = plt.figure(num=1.1, figsize=[12, 6])
+fig.clf()
+# markers = ['*', 'v', 's', 'o', 's', 'x']
+line_styles = ['-', '--', '-.', ':']
+
+for i, occ in enumerate(occulters):
+    plt.plot(distances, mag[i], lw=4.0, ms=10, marker=None,
+             ls=line_styles[i], fillstyle='full', label=f'{occ:.2f}')
+
+plt.legend(fontsize=24, title='occulter radius', title_fontsize=22)
+plt.xlabel('Source-lens distance [Einstein radii]', fontsize=24)
+plt.ylabel('magnification', fontsize=24)
+[l.set_fontsize(24) for l in plt.gca().get_xticklabels()]
+[l.set_fontsize(24) for l in plt.gca().get_yticklabels()]
+
+plt.gca().set_position([0.1, 0.15, 0.85, 0.8])
+plt.show()
+
+## save the plots
+
+plt.savefig('plots/example_lcs_occulters.pdf')
+plt.savefig('plots/example_lcs_occulters.png')
 
 ## setup a simulator
+import matplotlib.pyplot as plt
 import simulator
 sim = simulator.Simulator()
 
+## show some example systems: WD-WD (no eclipse)
+
+sim.calculate(star_mass=0.3, lens_mass=0.6, declination=0.02, semimajor_axis=0.15, star_temp=8000, lens_temp=4000)
+sim.syst.plot(font_size=24)
+
+plt.gcf().set_size_inches([16, 8])
+
+## save the plots
+
+plt.savefig('plots/example_wd_wd_system.pdf')
+plt.savefig('plots/example_wd_wd_system.png')
+
+
+## show some example systems: WD-WD (eclipse)
+
+sim.calculate(star_mass=0.6, lens_mass=0.6, declination=0.05, semimajor_axis=0.08, star_temp=8000, lens_temp=4000)
+sim.syst.plot(font_size=24)
+
+plt.gcf().set_size_inches([16, 8])
+
+
+## save the plots
+
+plt.savefig('plots/example_wd_wd_system_eclipse.pdf')
+plt.savefig('plots/example_wd_wd_system_eclipse.png')
+
+## show some example systems: WD-NS
+
+sim.calculate(star_mass=0.6, lens_mass=1.6, declination=0.05, semimajor_axis=0.08, star_temp=8000, lens_temp=4000)
+sim.syst.plot(font_size=24)
+
+plt.gcf().set_size_inches([16, 8])
+
+
+## save the plots
+
+plt.savefig('plots/example_wd_ns_system.pdf')
+plt.savefig('plots/example_wd_ns_system.png')
+
+## show some example systems: WD-BH
+
+sim.calculate(star_mass=0.6, lens_mass=10.0, declination=0.5, semimajor_axis=0.0005, star_temp=8000, lens_temp=4000)
+sim.syst.plot(font_size=24)
+
+plt.gcf().set_size_inches([16, 8])
+
+
+## save the plots
+
+plt.savefig('plots/example_wd_bh_system.pdf')
+plt.savefig('plots/example_wd_bh_system.png')
+
+
 ## peak magnification vs. orbital period
 
-plt.rc('font', size=16)
+plt.rc('font', size=22)
 sim.star_mass = 0.6
 sim.star_temp = 7000
 sim.declination = 0
@@ -152,7 +303,7 @@ ax_max = 50
 ax.set_ylim(ax_min, ax_max)
 ax.set_xlim(0.45, 1.5e8)
 
-ax.plot(ax.get_xlim(), np.ones(2) * thresholds[0], '--k', label=f'{int(thresholds[0]*1000)}mmag threshold', alpha=0.8)
+ax.plot(ax.get_xlim(), np.ones(2) * thresholds[0], '-.k', label=f'{int(thresholds[0]*1000)}mmag threshold', alpha=0.5)
 ax.plot(ax.get_xlim(), np.ones(2) * thresholds[1], '--k', label=f'{int(thresholds[1]*1000)}mmag threshold', alpha=0.5)
 
 ax.plot(np.ones(2) * 60, ax.get_ylim(), ':k', alpha=0.3)
@@ -169,7 +320,7 @@ ax.plot([0], [0], linestyle='none', label='"1/10": Duty cycle')
 # ax.legend(loc="lower right")
 # ax.set_position([0.08, 0.08, 0.64, 0.9])
 # ax.legend(loc="upper left", bbox_to_anchor=(1.04, 1))
-ax.legend()
+ax.legend(fontsize=20)
 
 ## save the plot
 
@@ -191,11 +342,18 @@ plt.savefig('plots/mag_vs_period.png')
 
 import survey
 
-survey_names = ['TESS', 'CURIOS', 'LSST', 'ZTF']
-markers = ['x', 'v', '*', '^', 's']
+plt.rc('font', size=24)
 
-fig = plt.figure(num=5).clf()
-fig, axes = plt.subplots(num=5, figsize=[12, 6])
+survey_names = ['TESS', 'CURIOS', 'LSST', 'ZTF']
+# markers = ['x', 'v', '*', '^', 's']
+line_styles = ['-', '--', ':', '-.']
+
+fig = plt.figure(num=5, figsize=[12, 6])
+plt.clf()
+axes = fig.add_axes([0.14, 0.14, 0.82, 0.82])
+
+# fig = plt.figure(num=5).clf()
+# fig, axes = plt.subplots(num=5, figsize=[18, 12])
 
 for i, s in enumerate(survey_names):
     new_survey = survey.Survey(s)
@@ -205,11 +363,11 @@ for i, s in enumerate(survey_names):
     else:
         m = np.linspace(12, new_survey.limmag)
         p = np.ones(m.shape) * new_survey.precision
-    axes.plot(m, p, marker=markers[i], label=s)
+    axes.plot(m, p, ls=line_styles[i], label=s, lw=4.0)
 
-axes.legend(loc='upper left', fontsize=14)
-axes.set_xlabel('Magnitude', fontsize=14)
-axes.set_ylabel('Photometric precision', fontsize=14)
+axes.legend(loc='upper left', fontsize=22)
+axes.set_xlabel('Magnitude')
+axes.set_ylabel('Photometric precision')
 axes.set_yscale('log')
 
 ## save the plot
@@ -361,7 +519,8 @@ axes.set_xscale('log')
 axes.set_xlabel('Semimajor axis [AU]', fontsize=14)
 axes.set_ylabel('effective volume [pc$^3$]', fontsize=14)
 
-period = lambda x: x ** (3 / 2) * 365.25
+# Kepler's law using two equal 0.6 solar mass WDs
+period = lambda x: x ** (3 / 2) * 365.25 / np.sqrt(1.2)
 ax2 = axes.twiny()
 ax2.set_xlabel('Period [days]', fontsize=14)
 ax2.set_xlim([period(x) for x in axes.get_xlim()])
@@ -386,8 +545,8 @@ plt.show()
 
 ## save the plot
 
-plt.savefig('plots/effective_volume.pdf')
-plt.savefig('plots/effective_volume.png')
+plt.savefig('plots/effective_volume_WD.pdf')
+plt.savefig('plots/effective_volume_WD.png')
 
 ## load the grid scan results for all surveys for BHs
 
@@ -437,9 +596,10 @@ axes.set_xscale('log')
 axes.set_xlabel('Semimajor axis [AU]', fontsize=14)
 axes.set_ylabel('effective volume [pc$^3$]', fontsize=14)
 
-period = lambda x: x ** (3 / 2) * 365.25 * 24  # hours (using Kepler's law)
+# minutes (using Kepler's law) assuming a 10 solar mass BH with a 0.6 WD
+period = lambda x: x ** (3 / 2) * 365.25 * 24 *60 / np.sqrt(10.6)
 ax2 = axes.twiny()
-ax2.set_xlabel('Period [hours]', fontsize=14)
+ax2.set_xlabel('Period [minutes]', fontsize=14)
 ax2.set_xlim([period(x) for x in axes.get_xlim()])
 ax2.set_xscale('log')
 
@@ -483,3 +643,72 @@ plt.show()
 
 plt.savefig('plots/effective_volume_BH.pdf')
 plt.savefig('plots/effective_volume_BH.png')
+
+
+## plot the number of WDs per semi-major axis
+
+fig, axes = plt.subplots(num=12, figsize=[8, 6])
+
+space_density = 0.0055
+binary_fraction = 0.1
+sma = np.geomspace(1e-4, 50, 1000)
+
+g = Grid()
+g.setup_demo_scan(wd_lens=True)
+g.star_masses = [0.6]
+number = g.semimajor_axis_distribution(alpha=-1.3, sma=sma)
+number *= space_density * binary_fraction / np.sum(number)
+
+print(number.shape)
+print(np.sum(number))
+
+axes.plot(sma, number, lw=3, label='total number of binary WDs')
+
+# add a second plot with the duty cycle weighed number of WDs
+constants = 220961382691907.84  # = G*M_sun*AU/c^2 = 6.67408e-11 * 1.989e30 * 1.496e11 / 299792458 ** 2
+r = np.sqrt(4 * constants * 0.6 * sma) / 1.496e11 # einstein radius in AU
+
+duty_cycle = r / sma  # in either space or time (total prob is this squared)
+
+num_observations = 1000  # number of observations on each target (estimate)
+# distance_pc = 1000  # distance to the target in pc
+
+number2 = number * duty_cycle ** 2 * num_observations #  * 4 / 3 * np.pi * distance_pc ** 3
+
+axes.plot(sma, number2, lw=3, label=f'with geometry $\\times$ duty cycle $\\times$ {num_observations} visits')
+
+number3 = number * duty_cycle
+
+axes.plot(sma, number3, lw=3, label=f'with geometry and constant monitoring')
+
+axes.set_xscale('log')
+axes.set_yscale('log')
+axes.set_xlabel('Semimajor axis [AU]', fontsize=16)
+axes.set_ylabel('Number of WDs per pc$^3$', fontsize=16)
+axes.tick_params(axis='x', labelsize=12)
+axes.tick_params(axis='y', labelsize=12)
+
+# days (using Kepler's law) assuming a 0.6 solar mass WD with a 0.6 WD
+period = lambda x: x ** (3 / 2) * 365.25 / np.sqrt(1.2)
+ax2 = axes.twiny()
+ax2.set_xlabel('Period [days]', fontsize=14)
+ax2.set_xlim([period(x) for x in axes.get_xlim()])
+ax2.tick_params(axis='x', labelsize=12)
+ax2.set_xscale('log')
+
+ax3 = axes.twinx()
+ax3.set_ylabel('Fraction of all WDs', fontsize=14)
+ax3.set_ylim([y / space_density for y in axes.get_ylim()])
+ax3.tick_params(axis='y', labelsize=12)
+ax3.set_yscale('log')
+
+axes.legend(loc='lower left', fontsize=14)
+
+plt.show()
+
+
+
+## save the plot
+
+plt.savefig('plots/semimajor_axis_population.pdf')
+plt.savefig('plots/semimajor_axis_population.png')

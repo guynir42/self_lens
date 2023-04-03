@@ -771,6 +771,9 @@ def make_surface_one_image(
     z1y,
     pixels=1e6,
     plotting=False,
+    left=None,
+    right=None,
+    top=None,
 ):
     """
     Take the contours of a single image of the source and plot it on a 2D binary map.
@@ -805,6 +808,16 @@ def make_surface_one_image(
         the resolution will be higher than for large sources.
     :param plotting: scalar boolean
         If True, will show the image of the two light blobs. Default is False.
+    :param left: scalar float
+        The left edge of the image in units of the Einstein radius.
+        If None, will use the leftmost edge of the contours.
+    :param right: scalar float
+        The right edge of the image in units of the Einstein radius.
+        If None, will use the rightmost edge of the contours.
+    :param top: scalar float
+        The top edge of the image in units of the Einstein radius.
+        If None, will use the topmost edge of the contours.
+        The bottom of the image is reflected from the top value.
 
     :return im: binary 2D array
         A 2D binary map of one of the images of the source after lensing.
@@ -825,9 +838,12 @@ def make_surface_one_image(
 
     """
     # extent of the required image, in Einstein units
-    left = np.min(z1x)
-    right = np.max(z1x)
-    top = np.max(z1y)
+    if left is None:
+        left = np.min(z1x)
+    if right is None:
+        right = np.max(z1x)
+    if top is None:
+        top = np.max(z1y)
 
     total_area = top * (right - left)
     resolution = np.sqrt(pixels/total_area)
@@ -878,6 +894,9 @@ def make_surface_with_hole(
     z2y,
     pixels=1e6,
     plotting=False,
+    left=None,
+    right=None,
+    top=None,
 ):
     """
     Take the contours of the two images of the source and plot them on a 2D binary map.
@@ -915,6 +934,16 @@ def make_surface_with_hole(
         the resolution will be higher than for large sources.
     :param plotting: scalar boolean
         If True, will show the image of the two light blobs. Default is False.
+    :param left: scalar float
+        The left edge of the image in units of the Einstein radius.
+        If None, will use the leftmost edge of the contours.
+    :param right: scalar float
+        The right edge of the image in units of the Einstein radius.
+        If None, will use the rightmost edge of the contours.
+    :param top: scalar float
+        The top edge of the image in units of the Einstein radius.
+        If None, will use the topmost edge of the contours.
+        The bottom of the image is reflected from the top value.
 
     :return im: binary 2D array
         A 2D binary map of the image(s) of the source after lensing.
@@ -935,9 +964,12 @@ def make_surface_with_hole(
 
     """
     # extent of the required image, in Einstein units
-    left = min(np.min(z1x), np.min(z2x))
-    right = max(np.max(z1x), np.max(z2x))
-    top = max(np.max(z1y), np.max(z2y))
+    if left is None:
+        left = min(np.min(z1x), np.min(z2x))
+    if right is None:
+        right = max(np.max(z1x), np.max(z2x))
+    if top is None:
+        top = max(np.max(z1y), np.max(z2y))
 
     # print(f'left= {left}, right= {right}, top= {top}')
 
@@ -1078,6 +1110,11 @@ def single_geometry(
     pixels=1e6,
     get_offsets=False,
     plotting=False,
+    legend=True,
+    axes=None,
+    left=None,
+    right=None,
+    top=None,
 ):
     """
     Directly calculate the magnification from a specific micro-lensing alignment.
@@ -1107,6 +1144,22 @@ def single_geometry(
     :param plotting: scalar boolean
         If True, will plot the image and show the positions of the source and lens.
         This uses the plot_geometry() function. Default is False.
+    :param legend: scalar boolean
+        If True, will show a legend on the plot.
+        Only used when plotting=True.
+        Default is True.
+    :param axes: matplotlib.axes object
+        If provided, will plot the image on the given axes.
+    :param left: scalar float
+        The left edge of the image in units of the Einstein radius.
+        If None, will use the leftmost edge of the contours.
+    :param right: scalar float
+        The right edge of the image in units of the Einstein radius.
+        If None, will use the rightmost edge of the contours.
+    :param top: scalar float
+        The top edge of the image in units of the Einstein radius.
+        If None, will use the topmost edge of the contours.
+        The bottom of the image is reflected from the top value.
 
     :return:
         Either return the magnification for this geometry as a scalar float,
@@ -1119,14 +1172,37 @@ def single_geometry(
     # print(f'time to draw contours: {timer() - t0:.3f}s')
 
     if distance < source_radius:  # internal small image (hole)
-        (im, x_grid, y_grid, resolution) = make_surface_with_hole(z1x, z1y, z2x, z2y, pixels=pixels)
+        (im, x_grid, y_grid, resolution) = make_surface_with_hole(
+            z1x,
+            z1y,
+            z2x,
+            z2y,
+            pixels=pixels,
+            left=left,
+            right=right,
+            top=top
+        )
         im = [im]
         x_grid = [x_grid]
         y_grid = [y_grid]
         resolution = [resolution]
     else:  # separate images
-        (im, x_grid, y_grid, resolution) = make_surface_one_image(z1x, z1y, pixels=pixels)
-        (im2, x_grid2, y_grid2, resolution2) = make_surface_one_image(z2x, z2y, pixels=pixels)
+        (im, x_grid, y_grid, resolution) = make_surface_one_image(
+            z1x,
+            z1y,
+            pixels=pixels,
+            left=left,
+            right=right,
+            top=top
+        )
+        (im2, x_grid2, y_grid2, resolution2) = make_surface_one_image(
+            z2x,
+            z2y,
+            pixels=pixels,
+            left=left,
+            right=right,
+            top=top
+        )
         im = [im, im2]
         x_grid = [x_grid, x_grid2]
         y_grid = [y_grid, y_grid2]
@@ -1162,9 +1238,31 @@ def single_geometry(
                 im_small,
                 ((0, im_new.shape[0] - im_small.shape[0]), (0, im_new.shape[1] - im_small.shape[1])),
             )
-            plot_geometry(im_new+im_small, x_grid_new, y_grid_new, source_radius, distance, occulter_radius, mag, offset)
+            plot_geometry(
+                im=im_new+im_small,
+                x_grid=x_grid_new,
+                y_grid=y_grid_new,
+                source_radius=source_radius,
+                distance=distance,
+                occulter_radius=occulter_radius,
+                mag=mag,
+                offset=offset,
+                legend=legend,
+                axes=axes,
+            )
         else:
-            plot_geometry(im[0], x_grid[0], y_grid[0], source_radius, distance, occulter_radius, mag, offset)
+            plot_geometry(
+                im=im[0],
+                x_grid=x_grid[0],
+                y_grid=y_grid[0],
+                source_radius=source_radius,
+                distance=distance,
+                occulter_radius=occulter_radius,
+                mag=mag,
+                offset=offset,
+                legend=legend,
+                axes=axes,
+            )
 
     if get_offsets:
         return mag, offset
@@ -1360,21 +1458,21 @@ def plot_geometry(
     axes.plot(distance + offset, 0, "r+", label="center of light")
 
     axes.set_aspect("equal")
-
+    axes.set(
+        title=f"d= {distance:.2f} | source r= {source_radius} "
+              f"| occulter r= {occulter_radius} | mag= {mag:.2f} | offset= {offset:.2f}",
+        xlabel='distance from lens center [Einstein radii]',
+    )
+    axes.xaxis.label.set_fontsize(14)
+    [l.set_fontsize(14) for l in axes.get_xticklabels()]
+    [l.set_fontsize(14) for l in axes.get_yticklabels()]
+    axes.title.set_fontsize(14)
     if legend:
-        axes.set(
-            title=f"d= {distance:.2f} | source r= {source_radius} "
-                   f"| occulter r= {occulter_radius} | mag= {mag:.2f} | offset= {offset:.2f}",
-            xlabel='distance from lens center [Einstein radii]',
-            position=[0.1, 0.125, 0.6, 0.8],
-        )
+        axes.set_position([0.1, 0.125, 0.6, 0.8])
         axes.legend(bbox_to_anchor=(1.04, 0.0), loc="lower left", fontsize=14)
-        axes.xaxis.label.set_fontsize(14)
-        [l.set_fontsize(14) for l in axes.get_xticklabels()]
-        [l.set_fontsize(14) for l in axes.get_yticklabels()]
         axes.title.set_position([0.0, 0.0, 1, 1])
         axes.title.set_horizontalalignment('left')
-        axes.title.set_fontsize(14)
+
     if pause_time:
         plt.show()
         plt.pause(pause_time)

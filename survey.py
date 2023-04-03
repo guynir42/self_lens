@@ -580,6 +580,18 @@ def setup_default_survey(name, kwargs):
         (18.0, 0.300)
     ]
 
+    lsst_mag = np.arange(10, 24, 1.0)
+    lsst_rms = np.ones(len(lsst_mag)) * 0.01
+    idx20 = np.where(lsst_mag == 20)[0][0]
+    # from https://iopscience.iop.org/article/10.3847/1538-4357/ab042c/pdf table 3, page 24
+    # ref citation: https://ui.adsabs.harvard.edu/abs/2019ApJ...873..111I/abstract
+    lsst_rms[idx20+1] = 0.01
+    lsst_rms[idx20+2] = 0.02
+    lsst_rms[idx20+3] = 0.04
+    lsst_rms[idx20+4] = 0.10
+
+    lsst_rms *= np.sqrt(2)  # the above data is for two exposures of 15s
+
     defaults = {
         'ZTF': {
             'name': 'ZTF',
@@ -615,7 +627,9 @@ def setup_default_survey(name, kwargs):
             'slew_time': 5,
             'filter': 'g',
             'limmag': 24.5,
-            'precision': 0.01,
+            # 'precision': 0.01,
+            'prec_list': lsst_rms,
+            'mag_list': lsst_mag,
             'cadence': 3,
             'duty_cycle': 0.25,
             'location': 'south',

@@ -571,7 +571,7 @@ class Grid:
 
         return self.get_probability_density(lens_temp=temp, star_temp=temp, lens_mass=mass, star_mass=mass, sma=sma)
 
-    def semimajor_axis_distribution(self, alpha):
+    def semimajor_axis_distribution(self, alpha=-1.3, sma=None, star_masses=None, lens_masses=None):
         """
         The parametrization given in reference Maoz et al 2018
         (https://ui.adsabs.harvard.edu/abs/2018MNRAS.476.2584M/abstract)
@@ -583,6 +583,17 @@ class Grid:
             The power law index of the zero age, semimajor axis power law index
             for binary white dwarfs that emerge from the comme envelope phase.
 
+        :param sma: array-like
+            The semimajor axis values to evaluate the distribution at.
+            If None, use the values in the dataset or the values of the object.
+
+        :param star_masses: array-like
+            The masses of the stars in solar masses.
+            If None, use the dataset masses or the masses on the object.
+        :param lens_masses: array-like
+            The masses of the lenses in solar masses.
+            If None, use the dataset masses or the masses on the object.
+
         :return: xarray data array
             The distribution of the number density (not normalized to anything)
             of the binary white dwarfs, based on their masses and semimajor axis.
@@ -592,17 +603,48 @@ class Grid:
         # const = const / (1.496e11) ** 4 * 3.15576e16 * (1.989e30) ** 3  # unit conversions
         const = 3.116488722396829e-09  # in units of AU^4 Gyr^-1 solar_mass ^-3
 
-        a = self.dataset.semimajor_axis
-        m1 = self.dataset.lens_mass
-        m2 = self.dataset.star_mass
+        if sma is None:
+            if self.dataset is not None:
+                sma = self.dataset.semimajor_axis
+            else:
+                sma = np.array(self.semimajor_axes)
+
+        if star_masses is not None:
+            m1 = star_masses
+        elif self.dataset is not None:
+            m1 = self.dataset.lens_mass
+        else:
+            m1 = np.array(self.lens_masses)
+
+        if lens_masses is not None:
+            m2 = lens_masses
+        elif self.dataset is not None:
+            m2 = self.dataset.lens_mass
+        else:
+            m2 = np.array(self.lens_masses)
+
         t0 = 13.5  # age of the galaxy in Gyr
 
-        x = a / (const * m1 * m2 * (m1 + m2) * t0) ** (1/4)
+        x = sma / (const * m1 * m2 * (m1 + m2) * t0) ** (1/4)
 
         if alpha == -1:
             return x ** 3 * np.log(1 + x ** (-4))
         else:
-            return x ** (4 + alpha) * ((1 + x ** (-4)) ** ((alpha + 1) / 4) - 1)
+            return - x ** (4 + alpha) * ((1 + x ** (-4)) ** ((alpha + 1) / 4) - 1)
+
+    def gravitational_semi_major_axis(self, lens_mass, star_mass):
+        """
+        The semi-major axis at which the systems will decay over the age of the galaxy.
+        """
+        # G = 6.6743e-11  # m^3 kg^-1 s^-2
+        # c = 299792458  # m/s
+        # t0 = 13.5e9 * 365.25 * 24 * 3600  # age of the galaxy in seconds
+        # Msun = 1.989e30  # kg
+        # AU = 1.496e11  # m
+        # Kt = 256/5* G**3 / c**5 * t0 = 2.6780664751035093e-54 # in units of m^4 kg^-3
+        # Kt = Kt * Msun^3 / AU^4 = 4.207259775235719e-08 solar_mass^-3
+
+        return np.power(4.207259775235719e-08 * lens_mass * star_mass * (lens_mass + star_mass), 0.25)
 
     def get_total_volume(self):
 
@@ -661,57 +703,68 @@ class Grid:
 
 if __name__ == "__main__":
 
-    if len(sys.argv) > 1:
-        survey_name = sys.argv[1].upper()
+    if 0:
+        if len(sys.argv) > 1:
+            survey_name = sys.argv[1].upper()
+        else:
+            survey_name = 'all_surveys'
+            # survey_name = 'ZTF'
+
+        if len(sys.argv) > 2:
+            lens_type = sys.argv[2]
+        else:
+            lens_type = 'BH'
+
+        if len(sys.argv) > 3:
+            demo_mode = sys.argv[3].upper()
+        else:
+            demo_mode = 'DEMO'
+
+        if lens_type not in ['WD', 'BH']:
+            raise ValueError('Value of "lens_type" must be "WD" or "BH". '
+                             f'Instead got "{lens_type}".')
+
+        if demo_mode not in ['DEMO', 'FULL']:
+            raise ValueError('Value of "demo_mode" must be "DEMO" or "REAL". '
+                             f'Instead got "{demo_mode}".')
+
+        print(f'Running {demo_mode} simulation for survey: {survey_name}')
+
+        g = Grid(wd_lens=lens_type == 'WD')
+        if demo_mode == 'DEMO':
+            g.setup_demo_scan(wd_lens=lens_type == 'WD')
+
+        if survey_name != 'all_surveys':
+            g.surveys = [survey.Survey(survey_name)]
+
+        g.run_simulation(keep_systems=demo_mode == 'DEMO')
+
+        ev = g.marginalize_declinations()
+
+        # make a probability distribution that is flat in semimajor axis space
+        prob_flat = g.get_probability_density(lens_temp=-2, star_temp=-2, lens_mass=(0.6, 0.2), star_mass=(0.6, 0.2))
+        g.dataset['probability_density_flat'] = prob_flat
+        prob = g.get_default_probability_density()
+        total_vol = float(g.get_total_volume())
+        print(f'total volume: {total_vol:.1f}pc^3')
+        # g.datset = xr.load_dataset('saved/grid_data.nc')
+        print(g.timing)
+
+        ds = g.dataset
+
+        if demo_mode == 'FULL':
+            try:
+                os.mkdir('saved')
+            except FileExistsError:
+                pass
+            g.dataset.to_netcdf(f'saved/simulate_{survey_name}_{lens_type}.nc')
+
     else:
-        survey_name = 'all_surveys'
-        # survey_name = 'ZTF'
-
-    if len(sys.argv) > 2:
-        lens_type = sys.argv[2]
-    else:
-        lens_type = 'BH'
-
-    if len(sys.argv) > 3:
-        demo_mode = sys.argv[3].upper()
-    else:
-        demo_mode = 'DEMO'
-
-    if lens_type not in ['WD', 'BH']:
-        raise ValueError('Value of "lens_type" must be "WD" or "BH". '
-                         f'Instead got "{lens_type}".')
-
-    if demo_mode not in ['DEMO', 'FULL']:
-        raise ValueError('Value of "demo_mode" must be "DEMO" or "REAL". '
-                         f'Instead got "{demo_mode}".')
-
-    print(f'Running {demo_mode} simulation for survey: {survey_name}')
-
-    g = Grid(wd_lens=lens_type == 'WD')
-    if demo_mode == 'DEMO':
-        g.setup_demo_scan(wd_lens=lens_type == 'WD')
-
-    if survey_name != 'all_surveys':
-        g.surveys = [survey.Survey(survey_name)]
-
-    g.run_simulation(keep_systems=demo_mode == 'DEMO')
-
-    ev = g.marginalize_declinations()
-
-    # make a probability distribution that is flat in semimajor axis space
-    prob_flat = g.get_probability_density(lens_temp=-2, star_temp=-2, lens_mass=(0.6, 0.2), star_mass=(0.6, 0.2))
-    g.dataset['probability_density_flat'] = prob_flat
-    prob = g.get_default_probability_density()
-    total_vol = float(g.get_total_volume())
-    print(f'total volume: {total_vol:.1f}pc^3')
-    # g.datset = xr.load_dataset('saved/grid_data.nc')
-    print(g.timing)
-
-    ds = g.dataset
-
-    if demo_mode == 'FULL':
-        try:
-            os.mkdir('saved')
-        except FileExistsError:
-            pass
-        g.dataset.to_netcdf(f'saved/simulate_{survey_name}_{lens_type}.nc')
+        g = Grid()
+        g.setup_demo_scan(wd_lens=True)
+        g.star_masses = [0.6]
+        print(g.semimajor_axis_distribution())
+        plt.plot(g.semimajor_axes, g.semimajor_axis_distribution())
+        plt.xscale('log')
+        plt.yscale('log')
+        plt.show()

@@ -1037,19 +1037,17 @@ class System:
     def is_detached(self):
         return self.roche_lobe > self.star_size
 
-    def plot(self, detection_limit=0.01, distance_pc=10, filter_list=['R', 'V', 'B'], fig=None, font_size=16):
+    def plot(self, detection_limit=0.01, distance_pc=10, filter_list=['R', 'V', 'B'], fig=None, font_size=14):
 
         if fig is None:
             fig, ax = plt.subplots(1, 2)
         else:
             ax = fig.subplots(2, 1)
 
-        ax[0].plot(self.timestamps, self.magnifications, '-ob',
+        ax[0].plot(self.timestamps, self.magnifications, '-b', lw=3.0,
                    label=f'magnification (max= {np.max(self.magnifications):.4f})')
-        ax[0].set(
-            xlabel=f'time [{self.time_units}]',
-            ylabel='magnification',
-        )
+        ax[0].set_xlabel(f'time [{self.time_units}]', fontsize=font_size)
+        ax[0].set_ylabel('magnification', fontsize=font_size)
 
         # show the detection limit
         ax[0].plot(self.timestamps, np.ones(self.magnifications.shape)*(1 + detection_limit),
@@ -1059,8 +1057,8 @@ class System:
         idx = self.magnifications - 1 > detection_limit
         if np.any(idx):
             width = max(self.timestamps[idx]) - min(self.timestamps[idx])
-            ax[0].plot(self.timestamps[idx], self.magnifications[idx], '-or',
-                     label=f'event time ({width:.1f} {self.time_units})')
+            ax[0].plot(self.timestamps[idx], self.magnifications[idx], '-r',
+                     label=f'event time ({width:.1f} {self.time_units})', lw=3.0)
 
         legend_handles, legend_labels = ax[0].get_legend_handles_labels()
 
@@ -1091,11 +1089,12 @@ class System:
         legend_labels.append(mag_str)
         legend_handles.append(Line2D([0], [0], lw=0))
 
-        ax[0].legend(legend_handles, legend_labels, bbox_to_anchor=(1.00, 0.95), loc="upper right")
+        ax[0].legend(legend_handles, legend_labels, bbox_to_anchor=(1.00, 0.95),
+                     loc="upper right", fontsize=font_size-4)
 
         # add a cartoon of the system in a subplot
         ax[0].set(position=[0.1, 0.1, 0.85, 0.85])
-        ax[1].set(position=[0.15, 0.45, 0.3, 0.25])
+        ax[1].set(position=[0.15, 0.35, 0.3, 0.25])
         ax[1].axes.xaxis.set_visible(False)
         ax[1].axes.yaxis.set_visible(False)
 
@@ -1106,7 +1105,8 @@ class System:
         solar_radii = '$R_\u2609$'
         solar_mass = '$M_\u2609$'
         star_label = f'{self.star_type} source: {self.star_mass:.2f}{solar_mass}, ' \
-                     f'{self.star_size:.3f}{solar_radii}, {self.source_size:.2f}$R_E$'
+                     f'{self.source_size:.2f}$R_E$'
+                     # f'{self.star_size:.3f}{solar_radii}, {self.source_size:.2f}$R_E$'
         star = plt.Circle((-2, 0), self.star_size / scale, color=get_star_plot_color(self.star_temp), label=star_label)
         ax[1].set_xlim((-3.2, 3.2))
         ax[1].set_ylim((-1.5, 1.5))
@@ -1115,7 +1115,9 @@ class System:
 
         # add the lensing object
         lens_label = f'{self.lens_type} occulter: {self.lens_mass:.2f}{solar_mass}, ' \
-                     f'{self.lens_size:.3f}{solar_radii}, {self.occulter_size:.2f}$R_E$'
+                     f'{self.occulter_size:.2f}$R_E$'
+                     # f'{self.lens_size:.3f}{solar_radii}, {self.occulter_size:.2f}$R_E$'
+
         lt = self.lens_type.strip().upper()
 
         if lt == 'WD':
@@ -1135,8 +1137,8 @@ class System:
         ax[1].add_patch(ring)
 
         phi = np.linspace(0, 2*np.pi, 1000)
-        x = 2*np.cos(phi)
-        y = 2*np.sin(phi) * np.sin(np.pi / 180 * (90 - self.inclination) * 50)
+        x = 2 * np.cos(phi)
+        y = 2 * np.sin(phi) * np.sin(np.pi / 180 * (90 - self.inclination) * 50)
         if self.semimajor_axis < 1:
             fmt = f'.{int(np.ceil(-np.log10(self.semimajor_axis)))}f'
         else:
@@ -1162,7 +1164,10 @@ class System:
         # legend_labels = [legend_labels[i] for i in order]
 
         ax[1].legend(legend_handles, legend_labels,
-                   bbox_to_anchor=(0.5, 1.04), loc="lower center")
+                   bbox_to_anchor=(0.5, 1.04), loc="lower center", fontsize=font_size-4)
+
+        [l.set_fontsize(font_size) for l in ax[0].get_xticklabels()]
+        [l.set_fontsize(font_size) for l in ax[0].get_yticklabels()]
 
         return ax
 
