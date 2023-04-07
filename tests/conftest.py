@@ -8,15 +8,15 @@ import xarray as xr
 from timeit import default_timer as timer
 
 sys.path.append(path.dirname(path.abspath(__file__)))
-import transfer_matrix
-import grid_scan
-import simulator
-import survey
+from src.transfer_matrix import TransferMatrix
+from src.grid_scan import Grid
+from src.simulator import Simulator
+from src.survey import Survey
 
 
 @pytest.fixture(scope="module")
 def grid():
-    g = grid_scan.Grid()
+    g = Grid()
     g.setup_demo_scan(wd_lens=True)
     always_recalculate = True
     if always_recalculate or not path.isfile("test_dataset.nc"):
@@ -32,24 +32,22 @@ def grid():
 
 @pytest.fixture
 def ztf():
-    return survey.Survey("ZTF")
+    return Survey("ZTF")
 
 
 @pytest.fixture
 def sim():
-    return simulator.Simulator()
+    return Simulator()
 
 
 @pytest.fixture
 def matrix():
-    return transfer_matrix.TransferMatrix.from_file("matrix.npz")
+    return TransferMatrix.from_file("matrix.npz")
 
 
 @pytest.fixture
 def matrix_large():
-    return transfer_matrix.TransferMatrix.from_file(
-        "saved/matrix_SR1.000-5.000_D0.000-20.000.npz"
-    )
+    return TransferMatrix.from_file("saved/matrix_SR1.000-5.000_D0.000-20.000.npz")
 
 
 @pytest.fixture
@@ -64,7 +62,7 @@ def counting_matrix_factory():
         max_occulter=0.3,
         step_occulter=0.3,
     ):
-        T = transfer_matrix.TransferMatrix()
+        T = TransferMatrix()
         T.min_dist = min_dist
         T.max_dist = max_dist
         T.step_dist = step_dist

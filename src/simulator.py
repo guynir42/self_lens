@@ -37,12 +37,8 @@ class Simulator:
         self.matrices = None  # list of matrices to use to produce the lightcurves
         self.syst = None  # the latest system output
 
-        self.latest_runtime = (
-            0  # how much time it took to calculate a single lightcurve
-        )
-        self.use_dilution = (
-            False  # automatically dilute the magnification with the companion flux
-        )
+        self.latest_runtime = 0  # how much time it took to calculate a single lightcurve
+        self.use_dilution = False  # automatically dilute the magnification with the companion flux
 
         # lensing parameters (in units of Einstein radius)
         self.einstein_radius = None  # in Solar units, to translate the input
@@ -56,9 +52,7 @@ class Simulator:
         self.semimajor_axis = 1  # in AU
         # self.inclination = 89.95  # orbital inclination (degrees)
         self.declination = 0.01  # 90-inclination (degrees)
-        self.compact_source = (
-            True  # is the source a compact object or a main sequence star?
-        )
+        self.compact_source = True  # is the source a compact object or a main sequence star?
         self.star_mass = 1  # in Solar mass units
         self.star_temp = 5000  # in Kelvin
         # use the following hidden properties to override the calculated type, size and flux
@@ -103,9 +97,7 @@ class Simulator:
         if self.semimajor_axis is None:
             return None
 
-        period = self.semimajor_axis ** (3 / 2) / np.sqrt(
-            self.star_mass + self.lens_mass
-        )
+        period = self.semimajor_axis ** (3 / 2) / np.sqrt(self.star_mass + self.lens_mass)
         period *= 365.25 * 24  # convert from years to hours
         return period
 
@@ -115,9 +107,7 @@ class Simulator:
             self.semimajor_axis = None
             return
         period /= 365.25 * 24  # convert from hours to years
-        self.semimajor_axis = (period * np.sqrt(self.star_mass + self.lens_mass)) ** (
-            2 / 3
-        )
+        self.semimajor_axis = (period * np.sqrt(self.star_mass + self.lens_mass)) ** (2 / 3)
 
     @property
     def star_type(self):
@@ -153,9 +143,7 @@ class Simulator:
             return 0
         else:
             const = 2.744452656619891e17  # boltzmann const * solar radius ** 2 * ergs
-            return (
-                4 * np.pi * const * self.star_size**2 * self.star_temp**4
-            )  # in erg/s
+            return 4 * np.pi * const * self.star_size**2 * self.star_temp**4  # in erg/s
 
     @star_flux.setter
     def star_flux(self, new_flux):
@@ -191,9 +179,7 @@ class Simulator:
             return 0
         else:
             const = 2.744452656619891e17  # boltzmann const * solar radius ** 2 * ergs
-            return (
-                4 * np.pi * const * self.lens_size**2 * self.lens_temp**4
-            )  # in erg/s
+            return 4 * np.pi * const * self.lens_size**2 * self.lens_temp**4  # in erg/s
 
     @lens_flux.setter
     def lens_flux(self, new_flux):
@@ -206,9 +192,7 @@ class Simulator:
     @time_units.setter
     def time_units(self, new_units):
         if self.timestamps is not None:
-            self.timestamps *= translate_time_units(
-                self.time_units
-            ) / translate_time_units(new_units)
+            self.timestamps *= translate_time_units(self.time_units) / translate_time_units(new_units)
         self._time_units = new_units
 
     def load_matrices(self, filenames=None):
@@ -244,9 +228,7 @@ class Simulator:
         elif t == "bh" or t == "black hole":
             t = "BH"
         else:
-            raise ValueError(
-                f'Unknown object type "{type}". Use "MS" or "WD" or "NS" or "BH"...'
-            )
+            raise ValueError(f'Unknown object type "{type}". Use "MS" or "WD" or "NS" or "BH"...')
 
         return t
 
@@ -282,29 +264,21 @@ class Simulator:
             raise ValueError("Must provide a mass for the lensing object.")
 
         constants = 220961382691907.84  # = G*M_sun*AU/c^2 = 6.67408e-11 * 1.989e30 * 1.496e11 / 299792458 ** 2
-        self.einstein_radius = np.sqrt(
-            4 * constants * self.lens_mass * self.semimajor_axis
-        )
+        self.einstein_radius = np.sqrt(4 * constants * self.lens_mass * self.semimajor_axis)
         self.einstein_radius /= 6.957e8  # translate from meters to solar radii
         if self.declination == 0:
             self.impact_parameter = 0
         else:
-            self.impact_parameter = self.semimajor_axis * np.sin(
-                self.declination / 180 * np.pi
-            )
+            self.impact_parameter = self.semimajor_axis * np.sin(self.declination / 180 * np.pi)
             self.impact_parameter *= 215.032  # convert to solar radii
-            self.impact_parameter /= (
-                self.einstein_radius
-            )  # convert to units of Einstein Radius
+            self.impact_parameter /= self.einstein_radius  # convert to units of Einstein Radius
 
         # self.orbital_period = self.semimajor_axis ** (3 / 2) / np.sqrt(self.star_mass + self.lens_mass)
         # self.orbital_period *= 365.25 * 24  # convert from years to hours
 
         # ref: https://ui.adsabs.harvard.edu/abs/1983ApJ...268..368E/abstract
         q = self.star_mass / self.lens_mass
-        self.roche_lobe = (0.49 * q ** (2 / 3)) / (
-            0.6 * q ** (2 / 3) + np.log(1 + q ** (1 / 3))
-        )
+        self.roche_lobe = (0.49 * q ** (2 / 3)) / (0.6 * q ** (2 / 3) + np.log(1 + q ** (1 / 3)))
         self.roche_lobe *= self.semimajor_axis * 215.032  # convert AU to Solar radii
 
         self.source_size = self.star_size / self.einstein_radius
@@ -321,23 +295,13 @@ class Simulator:
             time_range = 16 * self.crossing_time()  # in seconds
             time_range = min(time_range, self.orbital_period * 3600 / 4)
             self.timestamps = np.linspace(-time_range, time_range, 2001, endpoint=True)
-            self.timestamps /= translate_time_units(
-                self.time_units
-            )  # convert to correct units
+            self.timestamps /= translate_time_units(self.time_units)  # convert to correct units
 
-        phases = (self.timestamps * translate_time_units(self.time_units)) / (
-            self.orbital_period * 3600
-        )
+        phases = (self.timestamps * translate_time_units(self.time_units)) / (self.orbital_period * 3600)
 
-        projected_radius = (
-            self.semimajor_axis * 215.032 / self.einstein_radius
-        )  # AU to solar radii to Einstein radii
+        projected_radius = self.semimajor_axis * 215.032 / self.einstein_radius  # AU to solar radii to Einstein radii
         x = projected_radius * np.sin(2 * np.pi * phases)
-        y = (
-            projected_radius
-            * np.cos(2 * np.pi * phases)
-            * np.sin(self.declination / 180 * np.pi)
-        )
+        y = projected_radius * np.cos(2 * np.pi * phases) * np.sin(self.declination / 180 * np.pi)
         self.position_radii = np.sqrt(x**2 + y**2)
         self.position_angles = np.arctan2(y, x)
 
@@ -372,9 +336,7 @@ class Simulator:
             width += 2 * np.sqrt(self.source_size**2 - self.impact_parameter**2)
 
         width = max(1, width)
-        width *= (
-            self.einstein_radius / 215.032
-        )  # convert from Einstein radius to Solar radius to AU
+        width *= self.einstein_radius / 215.032  # convert from Einstein radius to Solar radius to AU
 
         velocity = 2 * np.pi * self.semimajor_axis / (self.orbital_period * 3600)
 
@@ -424,9 +386,7 @@ class Simulator:
 
         if self.use_dilution:
             total_flux = self.star_flux + self.lens_flux
-            self.magnifications = (
-                self.star_flux * self.magnifications + self.lens_flux
-            ) / total_flux
+            self.magnifications = (self.star_flux * self.magnifications + self.lens_flux) / total_flux
 
         self.fwhm = self.get_fwhm()
 
@@ -494,9 +454,7 @@ class Simulator:
         scale_km = self.length_scale_estimate(precision, threshold)
         quarter_circle_km = self.semimajor_axis * 150e6 / 2 * np.pi  # convert AU to km
 
-        return np.sin(
-            scale_km / quarter_circle_km
-        )  # sin weighting of low declination more than high
+        return np.sin(scale_km / quarter_circle_km)  # sin weighting of low declination more than high
 
     def visit_prob_all_declinations_estimate(self, precision=0.01, threshold=3):
         """
@@ -519,9 +477,7 @@ class Simulator:
         self.gui = self.GUI(self)
 
     class GraphicButton:
-        def __init__(
-            self, gui, axes, uitype, parameter, label=None, dx=None, altdata=None
-        ):
+        def __init__(self, gui, axes, uitype, parameter, label=None, dx=None, altdata=None):
             self.gui = gui  # link back to the GUI object that owns this object
             self.par_of_gui = False  # is the parameter associated with this GUI (=True) or with its owner (=False)
             self.button = None  # the ui-object
@@ -529,9 +485,7 @@ class Simulator:
             self.axes = axes  # the axes the ui-object is drawn on
             self.parameter = parameter
             self.func = None  # assign the function to call when using a push button
-            self.label = (
-                label if label is not None else parameter.replace("_", " ") + "="
-            )
+            self.label = label if label is not None else parameter.replace("_", " ") + "="
             self.use_log = False  # plot the sliders using a logarithmic scale
 
             if uitype in ("toggle", "text", "number", "slider", "radio"):
@@ -570,17 +524,13 @@ class Simulator:
 
                     def callback_input(text):
                         new_value = text
-                        self.gui.input_activation(
-                            self.parameter, self.button, new_value
-                        )
+                        self.gui.input_activation(self.parameter, self.button, new_value)
 
                 if uitype == "number":
 
                     def callback_input(text):
                         new_value = float(text)
-                        self.gui.input_activation(
-                            self.parameter, self.button, new_value
-                        )
+                        self.gui.input_activation(self.parameter, self.button, new_value)
 
                 self.button.on_submit(callback_input)
             elif uitype == "slider":
@@ -630,18 +580,12 @@ class Simulator:
             elif uitype == "push":
                 self.button = Button(axes, label)
                 # try to find this function in the GUI owner, if not, on the GUI itself
-                if hasattr(self.gui.owner, parameter) and callable(
-                    getattr(self.gui.owner, parameter)
-                ):
+                if hasattr(self.gui.owner, parameter) and callable(getattr(self.gui.owner, parameter)):
                     self.func = getattr(self.gui.owner, parameter)
-                elif hasattr(self.gui, parameter) and callable(
-                    getattr(self.gui, parameter)
-                ):
+                elif hasattr(self.gui, parameter) and callable(getattr(self.gui, parameter)):
                     self.func = getattr(self.gui, parameter)
                 else:
-                    raise KeyError(
-                        f'Cannot find a function named "{parameter}" on the GUI or owner.'
-                    )
+                    raise KeyError(f'Cannot find a function named "{parameter}" on the GUI or owner.')
 
                 def callback_push(event):
                     self.func()
@@ -650,9 +594,7 @@ class Simulator:
             elif uitype == "custom":
                 self.button = Button(axes, label)
             else:
-                raise KeyError(
-                    f'Unknown uitype ("{uitype}"). Try "push" or "toggle" or "input"'
-                )
+                raise KeyError(f'Unknown uitype ("{uitype}"). Try "push" or "toggle" or "input"')
 
         def update(self):
             value = self.gui.pars.get(self.parameter)
@@ -679,17 +621,13 @@ class Simulator:
         def __init__(self, owner):
             self.owner = owner
             self.pars = {}  # parameters to be passed to owner
-            self.buttons = (
-                []
-            )  # a list of GraphicButton objects for all input/info/action buttons
+            self.buttons = []  # a list of GraphicButton objects for all input/info/action buttons
             self.fig = None  # figure object
             self.gs = None  # gridspec object
             self.subfigs = None  # separate panels help build this up in a modular way
             self.plot_fig = None  # a specific subfigure for display of plots
             self.left_side_fig = None  # a shortcut to the left-side subfigure
-            self.auto_update = (
-                True  # if true, will also update the owner on every change
-            )
+            self.auto_update = True  # if true, will also update the owner on every change
             self.distance_pc = 10  # at what distance to show the magnitudes
             self.detection_limit = 0.01  # equivalent to photometric precision
             self.filter_list = [
@@ -703,9 +641,7 @@ class Simulator:
             # start building the subfigures and buttons
             self.fig = plt.figure(num="Self lensing GUI", figsize=(15, 10), clear=True)
             self.fig.canvas.mpl_disconnect(self.fig.canvas.manager.key_press_handler_id)
-            self.gs = self.fig.add_gridspec(
-                ncols=3, nrows=3, width_ratios=[2, 8, 2], height_ratios=[2, 10, 1]
-            )
+            self.gs = self.fig.add_gridspec(ncols=3, nrows=3, width_ratios=[2, 8, 2], height_ratios=[2, 10, 1])
             self.subfigs = []
 
             # the plotting area
@@ -721,24 +657,18 @@ class Simulator:
             ind = 0
             self.add_button(axes_left[ind], "number", "declination")
             ind += 1
-            self.add_button(
-                axes_left[ind], "slider", "declination", "", 0, (1e-4, 10, True)
-            )
+            self.add_button(axes_left[ind], "slider", "declination", "", 0, (1e-4, 10, True))
             ind += 1
             self.add_button(axes_left[ind], "number", "semimajor_axis")
             ind += 1
-            self.add_button(
-                axes_left[ind], "slider", "semimajor_axis", "", 0, (1e-4, 10, True)
-            )
+            self.add_button(axes_left[ind], "slider", "semimajor_axis", "", 0, (1e-4, 10, True))
             ind += 1
             self.add_button(axes_left[ind], "toggle", "compact_source")
             ind += 1
 
             self.add_button(axes_left[ind], "number", "star_mass")
             ind += 1
-            self.add_button(
-                axes_left[ind], "slider", "star_mass", "", 0, (0.1, 100, True)
-            )
+            self.add_button(axes_left[ind], "slider", "star_mass", "", 0, (0.1, 100, True))
             ind += 1
             self.add_button(axes_left[ind], "number", "star_temp")
             ind += 1
@@ -747,9 +677,7 @@ class Simulator:
 
             self.add_button(axes_left[ind], "number", "lens_mass")
             ind += 1
-            self.add_button(
-                axes_left[ind], "slider", "lens_mass", "", 0, (0.1, 100, True)
-            )
+            self.add_button(axes_left[ind], "slider", "lens_mass", "", 0, (0.1, 100, True))
             ind += 1
             self.add_button(axes_left[ind], "number", "lens_temp")
             ind += 1
@@ -764,15 +692,11 @@ class Simulator:
             ind = 0
             self.add_button(axes_right[ind], "number", "distance_pc")
             ind += 1
-            self.add_button(
-                axes_right[ind], "slider", "distance_pc", "", 0, (5, 10000, True)
-            )
+            self.add_button(axes_right[ind], "slider", "distance_pc", "", 0, (5, 10000, True))
             ind += 1
             self.add_button(axes_right[ind], "number", "detection_limit")
             ind += 1
-            self.add_button(
-                axes_right[ind], "slider", "detection_limit", "", 0, (1e-4, 10, True)
-            )
+            self.add_button(axes_right[ind], "slider", "detection_limit", "", 0, (1e-4, 10, True))
             ind += 1
             self.add_button(axes_right[ind], "text", "filter_list")
             ind += 1
@@ -795,9 +719,7 @@ class Simulator:
             self.subfigs.append(self.fig.add_subfigure(self.gs[2, 1], facecolor="0.75"))
             self.bottom_fig = self.subfigs[-1]
 
-            axes_bottom = self.subfigs[-1].subplots(
-                1, 2, gridspec_kw={"width_ratios": (1, 4)}
-            )
+            axes_bottom = self.subfigs[-1].subplots(1, 2, gridspec_kw={"width_ratios": (1, 4)})
             self.add_button(axes_bottom[0], "toggle", "auto_update")
             self.add_button(axes_bottom[1], "custom", "calculate", "calculate()")
 
@@ -811,23 +733,15 @@ class Simulator:
             self.update_buttons()
             self.update_display()
 
-        def add_button(
-            self, axes, uitype, parameter, label=None, dx=None, altdata=None
-        ):
-            self.buttons.append(
-                Simulator.GraphicButton(
-                    self, axes, uitype, parameter, label, dx, altdata
-                )
-            )
+        def add_button(self, axes, uitype, parameter, label=None, dx=None, altdata=None):
+            self.buttons.append(Simulator.GraphicButton(self, axes, uitype, parameter, label, dx, altdata))
             if uitype not in ("push", "custom"):
                 if hasattr(self.owner, parameter):
                     self.pars[parameter] = getattr(self.owner, parameter)
                 elif hasattr(self, parameter):
                     self.pars[parameter] = getattr(self, parameter)
                 else:
-                    raise KeyError(
-                        f'Parameter "{parameter}" does not exist in GUI or owner.'
-                    )
+                    raise KeyError(f'Parameter "{parameter}" does not exist in GUI or owner.')
 
         def toggle_activation(self, parameter, button):
             self.pars[parameter] = not self.pars[parameter]
@@ -864,9 +778,7 @@ class Simulator:
             self.update_buttons()
             # print(f'time to update buttons= {timer() - t0:.1f}s')
 
-            self.left_side_fig.suptitle(
-                f"runtime: {self.owner.latest_runtime:.4f}s", fontsize="x-large"
-            )
+            self.left_side_fig.suptitle(f"runtime: {self.owner.latest_runtime:.4f}s", fontsize="x-large")
 
         def update_owner(
             self,
@@ -911,10 +823,7 @@ class Simulator:
 
             # make the temperature sliders color match the star temperature
             for b in self.buttons:
-                if (
-                    isinstance(b.button, matplotlib.widgets.Slider)
-                    and "_temp" in b.parameter
-                ):
+                if isinstance(b.button, matplotlib.widgets.Slider) and "_temp" in b.parameter:
                     b.button.poly.set_color(get_star_plot_color(b.button.val))
 
 
@@ -939,9 +848,7 @@ class System:
         self.occulter_size = None  # in units of Einstein radii
         self.impact_parameter = None  # in units of Einstein radii
         self.fwhm = None  # the width of the peak (not specific to any survey)
-        self.timestamps = (
-            None  # for the lightcurve (units are given below, defaults to seconds)
-        )
+        self.timestamps = None  # for the lightcurve (units are given below, defaults to seconds)
         self._time_units = "seconds"  # for the above-mentioned timestamps
         self.magnifications = None  # the measured lightcurve
 
@@ -957,16 +864,13 @@ class System:
         self.dilutions = {}  # how much is the lens light diluting the flare
         self.flare_durations = {}  # duration above detection limit (sec)
         self.flare_prob = {}  # probability to detect flare at peak (i.e., best timing)
-        self.visit_prob = (
-            {}
-        )  # probability of detection in one visit (including duty cycle)
-        self.total_prob = (
-            {}
-        )  # probability after multiple visits over the duration of the survey per field
+        # probability of detection in one visit (including duty cycle)
+        self.visit_prob = {}
+        # probability after multiple visits over the duration of the survey per field
+        self.total_prob = {}
         self.total_volumes = {}  # volumes observed over the duration of the survey
-        self.visit_detections = (
-            {}
-        )  # how many detections per visit per field (on average)
+        # how many detections per visit per field (on average)
+        self.visit_detections = {}
         self.total_detections = {}  # how many detections per field over all visits
 
         # how much space is covered, weighed by visit prob.
@@ -980,9 +884,9 @@ class System:
         # E.g., to say there are 10 systems / parsec^3 with lens_mass=0.4
         # you must decide the lens mass range, maybe 0.35 to 0.45,
         # only then can you say how many "such systems" should exist
-        self.par_ranges = (
-            {}
-        )  # for mass/size/temp of lens/star, inclination, semimajor axis
+        # for mass/size/temp of lens/star, inclination, semimajor axis:
+        self.par_ranges = {}
+
         self.spatial_density = None  # how many such system we expect exist per parsec^3
 
     @property
@@ -991,9 +895,7 @@ class System:
 
     @time_units.setter
     def time_units(self, new_units):
-        self.timestamps *= translate_time_units(self.time_units) / translate_time_units(
-            new_units
-        )
+        self.timestamps *= translate_time_units(self.time_units) / translate_time_units(new_units)
         self._time_units = new_units
 
     @property
@@ -1016,9 +918,7 @@ class System:
         flux = self.star_flux + self.lens_flux
 
         # ref: https://www.iau.org/static/resolutions/IAU2015_English.pdf
-        return (
-            -2.5 * np.log10(flux) + 71.197425 + 17.5
-        )  # the 17.5 is to convert W->erg/s
+        return -2.5 * np.log10(flux) + 71.197425 + 17.5  # the 17.5 is to convert W->erg/s
 
     def ab_mag(self, wavelength, bandwidth, get_dilution=False):
         """
@@ -1049,9 +949,7 @@ class System:
         filt_bounds = (wavelength - bandwidth / 2, wavelength + bandwidth / 2)
         filter_low_f = c_nm / max(filt_bounds)
         filter_high_f = c_nm / min(filt_bounds)
-        flux1 = integ.quad(
-            self.black_body, filter_low_f, filter_high_f, args=(self.star_temp, True)
-        )[0]
+        flux1 = integ.quad(self.black_body, filter_low_f, filter_high_f, args=(self.star_temp, True))[0]
         # integrate over surface of star, divide by sphere at 10pc
         flux1 *= (self.star_size * sun_radius) ** 2 / (10 * pc) ** 2  # erg/s/cm^2
 
@@ -1068,15 +966,11 @@ class System:
 
         # this flux is equivalent to flux from flat spectrum source with how many janskies?
         # flat_source = (filter_high_f - filter_low_f)  # this is true if we don't count photons
-        flat_source = one_over_h * np.log(
-            filter_high_f / filter_low_f
-        )  # integrate over 1/(hf)
+        flat_source = one_over_h * np.log(filter_high_f / filter_low_f)  # integrate over 1/(hf)
         equiv_flux1 = flux1 / flat_source  # in erg/s/cm^2
         equiv_flux2 = flux2 / flat_source
 
-        mag = (
-            -2.5 * np.log10(equiv_flux1 + equiv_flux2) - 48.60
-        )  # -2.5 * np.log10(equiv_flux / 3631e-23)
+        mag = -2.5 * np.log10(equiv_flux1 + equiv_flux2) - 48.60  # -2.5 * np.log10(equiv_flux / 3631e-23)
 
         if get_dilution:
             dilution = flux1 / (flux1 + flux2)
@@ -1137,12 +1031,8 @@ class System:
         filt_bounds = (wavelength - bandwidth / 2, wavelength + bandwidth / 2)
         filter_low_f = c_nm / max(filt_bounds)
         filter_high_f = c_nm / min(filt_bounds)
-        flux1 = integ.quad(
-            System.black_body, filter_low_f, filter_high_f, args=(temp1, True)
-        )[0]
-        flux2 = integ.quad(
-            System.black_body, filter_low_f, filter_high_f, args=(temp2, True)
-        )[0]
+        flux1 = integ.quad(System.black_body, filter_low_f, filter_high_f, args=(temp1, True))[0]
+        flux2 = integ.quad(System.black_body, filter_low_f, filter_high_f, args=(temp2, True))[0]
 
         distance_ratio = np.sqrt(flux2 / flux1)
 
@@ -1208,12 +1098,8 @@ class System:
         filt_la1 = wavelength - bandwidth / 2
         filt_la2 = wavelength + bandwidth / 2
 
-        bolometric1 = integ.quad(
-            black_body, *find_lambda_range(self.star_temp), args=(self.star_temp, True)
-        )[0]
-        in_band1 = integ.quad(
-            black_body, filt_la1, filt_la2, args=(self.star_temp, True)
-        )[0]
+        bolometric1 = integ.quad(black_body, *find_lambda_range(self.star_temp), args=(self.star_temp, True))[0]
+        in_band1 = integ.quad(black_body, filt_la1, filt_la2, args=(self.star_temp, True))[0]
         fraction1 = in_band1 / bolometric1
         # print(f'bolometric1= {bolometric1} | in_band1= {in_band1}')
 
@@ -1223,9 +1109,7 @@ class System:
                 *find_lambda_range(self.lens_temp),
                 args=(self.lens_temp, True),
             )[0]
-            in_band2 = integ.quad(
-                black_body, filt_la1, filt_la2, args=(self.lens_temp, True)
-            )[0]
+            in_band2 = integ.quad(black_body, filt_la1, filt_la2, args=(self.lens_temp, True))[0]
             fraction2 = in_band2 / bolometric2
         else:
             fraction2 = 0
@@ -1234,9 +1118,7 @@ class System:
         flux_bolo = self.star_flux + self.lens_flux
 
         ratio = flux_band / flux_bolo
-        dilution = (self.star_flux * fraction1) / (
-            self.star_flux * fraction1 + self.lens_flux * fraction2
-        )
+        dilution = (self.star_flux * fraction1) / (self.star_flux * fraction1 + self.lens_flux * fraction2)
 
         return 2.5 * np.log10(ratio), dilution
 
@@ -1314,20 +1196,12 @@ class System:
 
         # add the magnitudes at distance_pc
         if isinstance(filter_list, str):
-            filter_list = (
-                filter_list.replace("[", "")
-                .replace("]", "")
-                .replace("'", "")
-                .strip()
-                .split(",")
-            )
+            filter_list = filter_list.replace("[", "").replace("]", "").replace("'", "").strip().split(",")
 
         mag_str = f"Mag (at {int(distance_pc):d}pc):"
         for i, filt in enumerate(filter_list):
             filter_pars = default_filter(filt.strip())
-            magnitude = self.apply_distance(
-                self.ab_mag(*filter_pars), distance_pc, *filter_pars
-            )
+            magnitude = self.apply_distance(self.ab_mag(*filter_pars), distance_pc, *filter_pars)
             if i % 3 == 0:
                 mag_str += "\n"
             mag_str += f" {filt}~{magnitude:.2f},"
@@ -1356,10 +1230,7 @@ class System:
         # add the star / source
         solar_radii = "$R_\u2609$"
         solar_mass = "$M_\u2609$"
-        star_label = (
-            f"{self.star_type} source: {self.star_mass:.2f}{solar_mass}, "
-            f"{self.source_size:.2f}$R_E$"
-        )
+        star_label = f"{self.star_type} source: {self.star_mass:.2f}{solar_mass}, " f"{self.source_size:.2f}$R_E$"
         # f'{self.star_size:.3f}{solar_radii}, {self.source_size:.2f}$R_E$'
         star = plt.Circle(
             (-2, 0),
@@ -1373,10 +1244,7 @@ class System:
         ax[1].add_patch(star)
 
         # add the lensing object
-        lens_label = (
-            f"{self.lens_type} occulter: {self.lens_mass:.2f}{solar_mass}, "
-            f"{self.occulter_size:.2f}$R_E$"
-        )
+        lens_label = f"{self.lens_type} occulter: {self.lens_mass:.2f}{solar_mass}, " f"{self.occulter_size:.2f}$R_E$"
         # f'{self.lens_size:.3f}{solar_radii}, {self.occulter_size:.2f}$R_E$'
 
         lt = self.lens_type.strip().upper()
@@ -1389,15 +1257,11 @@ class System:
                 label=lens_label,
             )
         elif lt == "NS":
-            lens = plt.Circle(
-                (2, 0), 0.1, color=get_star_plot_color(self.lens_temp), label=lens_label
-            )
+            lens = plt.Circle((2, 0), 0.1, color=get_star_plot_color(self.lens_temp), label=lens_label)
         elif lt == "BH":
             lens = plt.Circle((2, 0), 0.05, color="black", label=lens_label)
         else:
-            raise KeyError(
-                f'Unknown lens type ("{self.lens_type}"). Try using "WD" or "BH"... '
-            )
+            raise KeyError(f'Unknown lens type ("{self.lens_type}"). Try using "WD" or "BH"... ')
 
         ax[1].add_patch(lens)
 
@@ -1431,18 +1295,12 @@ class System:
         legend_handles, legend_labels = ax[1].get_legend_handles_labels()
 
         # replace the legend markers
-        legend_handles[0] = Line2D(
-            [0], [0], lw=0, marker="o", color=get_star_plot_color(self.star_temp)
-        )  # star
+        legend_handles[0] = Line2D([0], [0], lw=0, marker="o", color=get_star_plot_color(self.star_temp))  # star
 
         if lt == "BH":
-            legend_handles[1] = Line2D(
-                [0], [0], lw=0, marker="o", color="black"
-            )  # lens
+            legend_handles[1] = Line2D([0], [0], lw=0, marker="o", color="black")  # lens
         else:
-            legend_handles[1] = Line2D(
-                [0], [0], lw=0, marker="o", color=get_star_plot_color(self.lens_temp)
-            )  # lens
+            legend_handles[1] = Line2D([0], [0], lw=0, marker="o", color=get_star_plot_color(self.lens_temp))  # lens
 
         legend_handles[2] = Line2D([0], [0], linestyle=":", color="r")  # einstein ring
 
@@ -1526,18 +1384,14 @@ class System:
 
                     if p in par_dict:
                         if value and par_dict[p][1]:
-                            new_str.append(
-                                f"{par_dict[p][0]}: {value} {par_dict[p][1]}"
-                            )
+                            new_str.append(f"{par_dict[p][0]}: {value} {par_dict[p][1]}")
                         else:
                             new_str.append(f"{par_dict[p][0]}: {value}")
                     else:
                         new_str.append(f"{p}: {value}")
                 print(" | ".join(new_str))
 
-        print(
-            f"flare peak: {max(self.magnifications)-1:.2g} | flare FWHM: {self.fwhm:.2g} s"
-        )
+        print(f"flare peak: {max(self.magnifications)-1:.2g} | flare FWHM: {self.fwhm:.2g} s")
 
         if surveys is None:
             surveys = list(self.apparent_mags.keys())
@@ -1557,17 +1411,13 @@ class System:
                 print()
                 print(f"Survey results for {s}:")
 
-                series_time = survey.series_length * (
-                    survey.exposure_time + survey.dead_time
-                )
+                series_time = survey.series_length * (survey.exposure_time + survey.dead_time)
 
                 new_str = []
                 t_flare = max(self.flare_durations[s])
                 new_str.append(f"flare duration: {t_flare:.2g} s")
                 new_str.append(f"period: {self.period_string()}")
-                new_str.append(
-                    f"duty cycle: {t_flare / self.orbital_period / 3600:.2g}"
-                )
+                new_str.append(f"duty cycle: {t_flare / self.orbital_period / 3600:.2g}")
                 new_str.append(f"exp time: {survey.exposure_time}")
                 new_str.append(f"series time: {series_time:.2g} s")
                 print(" | ".join(new_str))
@@ -1624,9 +1474,7 @@ def black_body(la, temp, photons=False):  # black body radiation
         return the radiation (in units of Watts per steradian per m^2 per nm)
         if photons=True, returns photons per second per steradian per m^2 per nm.
     """
-    const = (
-        0.014387773538277204  # h*c/k_b = 6.62607004e-34 * 299792458 / 1.38064852e-23
-    )
+    const = 0.014387773538277204  # h*c/k_b = 6.62607004e-34 * 299792458 / 1.38064852e-23
     amp = 1.1910429526245744e-25  # 2*h*c**2 * (nm / m) = 2*6.62607004e-34 * 299792458**2 / 1e9 the last term is units
     la = la * 1e-9  # convert wavelength from nm to m
 
@@ -1642,9 +1490,7 @@ def translate_time_units(units):
         "years": 3600 * 24 * 365.25,
     }
     if units not in d:
-        raise KeyError(
-            f'Unknown units specified ("{units}"). Try "seconds" or "hours". '
-        )
+        raise KeyError(f'Unknown units specified ("{units}"). Try "seconds" or "hours". ')
     return d[units.lower()]
 
 

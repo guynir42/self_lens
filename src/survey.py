@@ -43,53 +43,23 @@ class Survey:
         # survey statistics
         self.field_area = kwargs.get("field_area")  # in square degrees
         self.exposure_time = kwargs.get("exposure_time")  # in seconds
-        self.dead_time = kwargs.get(
-            "dead_time", 0
-        )  # time between exposures in a series
-        self.series_length = kwargs.get(
-            "series_length", 1
-        )  # number of images taken continuously in one visit
-        self.num_visits = kwargs.get(
-            "num_visits"
-        )  # how many times each field is visited throughout survey life
-        self.num_fields = kwargs.get(
-            "num_fields"
-        )  # how many different fields are observed by the survey
-        self.cadence = kwargs.get(
-            "cadence"
-        )  # how much time (days) passes between starts of visits (do we need this?)
-        self.slew_time = kwargs.get(
-            "slew_time", 0
-        )  # time (in seconds) it takes to slew to new field at end of visit
-        self.duty_cycle = kwargs.get(
-            "duty_cycle"
-        )  # fraction on-sky, excluding dead time, daylight, weather
-        self.footprint = kwargs.get(
-            "footprint"
-        )  # what fraction of the sky is surveyed (typically 0.5 or 1)
-        self.duration = kwargs.get(
-            "duration", 1
-        )  # years (setting default 1 to get detections per year)
+        self.dead_time = kwargs.get("dead_time", 0)  # time between exposures in a series
+        self.series_length = kwargs.get("series_length", 1)  # number of images taken continuously in one visit
+        self.num_visits = kwargs.get("num_visits")  # how many times each field is visited throughout survey life
+        self.num_fields = kwargs.get("num_fields")  # how many different fields are observed by the survey
+        self.cadence = kwargs.get("cadence")  # how much time (days) passes between starts of visits (do we need this?)
+        self.slew_time = kwargs.get("slew_time", 0)  # time (in seconds) it takes to slew to new field at end of visit
+        self.duty_cycle = kwargs.get("duty_cycle")  # fraction on-sky, excluding dead time, daylight, weather
+        self.footprint = kwargs.get("footprint")  # what fraction of the sky is surveyed (typically 0.5 or 1)
+        self.duration = kwargs.get("duration", 1)  # years (setting default 1 to get detections per year)
 
         # filters and image depths
-        self.limmag = kwargs.get(
-            "limmag"
-        )  # objects fainter than this would not be seen at all  (faintest magnitude)
-        self.precision = kwargs.get(
-            "precision"
-        )  # photometric precision per image (best possible value)
-        self.threshold = kwargs.get(
-            "threshold", 5
-        )  # need 5 sigma for a detection by default
-        self.mag_list = kwargs.get(
-            "mag_list"
-        )  # list of magnitudes over which the survey is sensitive
-        self.prec_list = kwargs.get(
-            "prec_list"
-        )  # list of photometric precision for each mag_list item
-        self.distances = kwargs.get(
-            "distances", np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:]
-        )
+        self.limmag = kwargs.get("limmag")  # objects fainter than this would not be seen at all  (faintest magnitude)
+        self.precision = kwargs.get("precision")  # photometric precision per image (best possible value)
+        self.threshold = kwargs.get("threshold", 5)  # need 5 sigma for a detection by default
+        self.mag_list = kwargs.get("mag_list")  # list of magnitudes over which the survey is sensitive
+        self.prec_list = kwargs.get("prec_list")  # list of photometric precision for each mag_list item
+        self.distances = kwargs.get("distances", np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:])
         self.filter = kwargs.get("filter", "V")
         self.wavelength = None  # central wavelength (in nm)
         self.bandpass = None  # assume top-hat (in nm)
@@ -127,11 +97,7 @@ class Survey:
         to each field over the duration of the survey.
         """
 
-        if (
-            self.num_visits is None
-            and self.num_fields is None
-            and self.series_length is not None
-        ):
+        if self.num_visits is None and self.num_fields is None and self.series_length is not None:
             # validate that we have all the needed information
             for arg in [
                 "cadence",
@@ -144,25 +110,14 @@ class Survey:
                 "field_area",
             ]:
                 if getattr(self, arg) is None:
-                    raise ValueError(
-                        f"Cannot find number of fields/visits without {arg}"
-                    )
+                    raise ValueError(f"Cannot find number of fields/visits without {arg}")
 
-            visit_time = (
-                self.series_length * (self.exposure_time + self.dead_time)
-                + self.slew_time
-            )
-            self.num_fields = int(
-                np.round(self.cadence * 24 * 3600 * self.duty_cycle / visit_time)
-            )
+            visit_time = self.series_length * (self.exposure_time + self.dead_time) + self.slew_time
+            self.num_fields = int(np.round(self.cadence * 24 * 3600 * self.duty_cycle / visit_time))
             self.num_visits = int(np.round(self.duration * 365.25 / self.cadence))
 
         # in case we know the cadence and want to figure out the series length (e.g., for CURIOS)
-        elif (
-            self.num_visits is None
-            and self.num_fields is None
-            and self.series_length is None
-        ):
+        elif self.num_visits is None and self.num_fields is None and self.series_length is None:
             # validate that we have all the needed information
             for arg in [
                 "footprint",
@@ -175,21 +130,12 @@ class Survey:
                 "field_area",
             ]:
                 if getattr(self, arg) is None:
-                    raise ValueError(
-                        f"Cannot find number of fields/visits without {arg}"
-                    )
+                    raise ValueError(f"Cannot find number of fields/visits without {arg}")
 
             self.num_visits = int(np.round(self.duration * 365.25 / self.cadence))
-            self.num_fields = int(
-                np.round(self.footprint * 4 * 180**2 / np.pi / self.field_area)
-            )
+            self.num_fields = int(np.round(self.footprint * 4 * 180**2 / np.pi / self.field_area))
             visit_time = self.cadence * 24 * 3600 * self.duty_cycle / self.num_fields
-            self.series_length = int(
-                np.round(
-                    (visit_time - self.slew_time)
-                    / (self.exposure_time + self.dead_time)
-                )
-            )
+            self.series_length = int(np.round((visit_time - self.slew_time) / (self.exposure_time + self.dead_time)))
 
         # # we know what part of the sky we want to cover but want the cadence to be set automatically
         # elif self.cadence is None and self.num_fields is None and self.num_visits is None:
@@ -230,49 +176,23 @@ class Survey:
         """
 
         # these are the null values for a system that cannot be detected at all (i.e., an early return statement)
-        system.distances[self.name] = np.array(
-            []
-        )  # distances (in pc) at which this system is detectable
-        system.volumes[self.name] = np.array(
-            []
-        )  # single visit space volume for those distances * field of view (pc^3)
-        system.apparent_mags[self.name] = np.array(
-            []
-        )  # magnitude of the system at given distance (in survey's filter)
-        system.precisions[self.name] = np.array(
-            []
-        )  # precision measured for each apparent magnitude
+        system.distances[self.name] = np.array([])  # distances (in pc) at which this system is detectable
+        system.volumes[self.name] = np.array([])  # single visit space volume for those distances * field of view (pc^3)
+        system.apparent_mags[self.name] = np.array([])  # magnitude of the system at given distance (in survey's filter)
+        system.precisions[self.name] = np.array([])  # precision measured for each apparent magnitude
         system.total_volumes[self.name] = np.array([])  # volume for all fields
-        system.dilutions[
-            self.name
-        ] = 1.0  # dilution factor of two bright sources, at this filter
+        system.dilutions[self.name] = 1.0  # dilution factor of two bright sources, at this filter
 
-        system.flare_durations[self.name] = np.array(
-            []
-        )  # duration the flare is above threshold, at each distance
-        system.flare_prob[self.name] = np.array(
-            []
-        )  # detection prob. for a flare, at best timing
-        system.visit_prob[self.name] = np.array(
-            []
-        )  # detection prob. for a single visit
-        system.total_prob[self.name] = np.array(
-            []
-        )  # multiply prob. by number of total visits for a single field
-        system.visit_detections[self.name] = np.array(
-            []
-        )  # how many detections (on average) per visit
-        system.total_detections[self.name] = np.array(
-            []
-        )  # how many detections (on average) over all visits
-        system.effective_volumes[
-            self.name
-        ] = 0.0  # volume covered by all visits to all sky (weighed by probability)
+        system.flare_durations[self.name] = np.array([])  # duration the flare is above threshold, at each distance
+        system.flare_prob[self.name] = np.array([])  # detection prob. for a flare, at best timing
+        system.visit_prob[self.name] = np.array([])  # detection prob. for a single visit
+        system.total_prob[self.name] = np.array([])  # multiply prob. by number of total visits for a single field
+        system.visit_detections[self.name] = np.array([])  # how many detections (on average) per visit
+        system.total_detections[self.name] = np.array([])  # how many detections (on average) over all visits
+        system.effective_volumes[self.name] = 0.0  # volume covered by all visits to all sky (weighed by probability)
 
         # first figure out what magnitudes and precisions we can get on this system:
-        (abs_mag, dilution) = system.ab_mag(
-            self.wavelength, self.bandpass, get_dilution=True
-        )
+        (abs_mag, dilution) = system.ab_mag(self.wavelength, self.bandpass, get_dilution=True)
         system.dilutions[self.name] = dilution
 
         dist = []
@@ -293,9 +213,7 @@ class Survey:
         if self.prec_list is None:
             prec = np.ones(len(mag)) * self.precision
         else:
-            prec = np.interp(
-                mag, self.mag_list, self.prec_list
-            )  # interpolate the precision at given magnitudes
+            prec = np.interp(mag, self.mag_list, self.prec_list)  # interpolate the precision at given magnitudes
 
         if len(prec) == 0:
             return  # cannot observe this target at all, we have no precision for this magnitude
@@ -328,9 +246,7 @@ class Survey:
             elif np.all(det_lc < p):
                 flare_time_per_distance.append(0)
             else:
-                end_idx = np.argmin(
-                    det_lc > p
-                )  # first index where lc dips below precision
+                end_idx = np.argmin(det_lc > p)  # first index where lc dips below precision
 
                 t1 = ts[mid_idx + end_idx - 1]
                 t2 = ts[mid_idx + end_idx]
@@ -354,33 +270,23 @@ class Survey:
         system.distances[self.name] = dist
         system.apparent_mags[self.name] = mag
         solid_angle = self.field_area * (np.pi / 180) ** 2
-        system.volumes[self.name] = np.diff(
-            solid_angle / 3 * dist**3, prepend=solid_angle / 3 * MIN_DIST_PC**3
-        )
-        system.total_volumes[self.name] = (
-            system.volumes[self.name] * self.num_fields
-        )  # for all fields
+        system.volumes[self.name] = np.diff(solid_angle / 3 * dist**3, prepend=solid_angle / 3 * MIN_DIST_PC**3)
+        system.total_volumes[self.name] = system.volumes[self.name] * self.num_fields  # for all fields
         system.flare_durations[self.name] = flare_time_per_distance
         system.precisions[self.name] = prec
 
-        best_precision_idx = (
-            np.argmin(prec) if len(prec) else []
-        )  # index of best precision
+        best_precision_idx = np.argmin(prec) if len(prec) else []  # index of best precision
         best_precision = prec[best_precision_idx]
         best_flare_time = flare_time_per_distance[best_precision_idx]
 
         period = system.orbital_period * 3600  # convert to seconds
-        if len(
-            prec
-        ):  # only calculate probabilities for distances that have any chance of detection
+        if len(prec):  # only calculate probabilities for distances that have any chance of detection
 
             (peak_prob, mean_prob, num_detections) = self.calc_prob(
                 lc, ts, prec, best_precision, best_flare_time, period, plotting
             )
 
-            if (
-                self.exposure_time > period
-            ):  # this only applies to simple S/N case of diluted signal
+            if self.exposure_time > period:  # this only applies to simple S/N case of diluted signal
                 pass  # TODO: figure out this case later
 
             system.flare_prob[self.name] = peak_prob
@@ -404,9 +310,7 @@ class Survey:
         if self.name not in (s.name for s in system.surveys):
             system.surveys.append(self)
 
-    def calc_prob(
-        self, lc, ts, precision, best_precision, best_t_flare, period, plotting=False
-    ):
+    def calc_prob(self, lc, ts, precision, best_precision, best_t_flare, period, plotting=False):
         """
         For a given lightcurve calculate the S/N and time coverage.
         In some cases the S/N is just one number, while in other cases
@@ -457,41 +361,25 @@ class Survey:
         # the snr represents the probability to detect a single flare (ignoring periodicity),
         # assuming the flare occured inside the time span of the series
 
-        multiplicative_factor = (
-            1  # the S/N values are the only valid probability points
-        )
+        multiplicative_factor = 1  # the S/N values are the only valid probability points
         if best_t_flare * 10 < t_exp:  # flare is much shorter than exposure time
-            signal = np.sum(
-                lc[1:] * np.diff(ts)
-            )  # total signal in flare (skip 1st bin of LC to multiply with diff)
+            signal = np.sum(lc[1:] * np.diff(ts))  # total signal in flare (skip 1st bin of LC to multiply with diff)
             noise = t_exp * best_precision  # total noise in exposure
             snr = signal / noise
             snr = np.array([snr])  # put this into a 1D array
 
             # coverage = t_exp  # the only times where prob>0 is inside the exposure
-            dt = (
-                t_series * t_exp / (t_exp + t_dead)
-            )  # some parts of t_series are dead times
-        elif (
-            t_exp * 10 < best_t_flare < t_series / 10
-        ):  # exposures are short and numerous: can use matched-filter
+            dt = t_series * t_exp / (t_exp + t_dead)  # some parts of t_series are dead times
+        elif t_exp * 10 < best_t_flare < t_series / 10:  # exposures are short and numerous: can use matched-filter
             # TODO: add dead time
-            snr = (
-                np.sqrt(np.sum(lc**2)) / best_precision
-            )  # sum over different exposures hitting places on the LC
+            snr = np.sqrt(np.sum(lc**2)) / best_precision  # sum over different exposures hitting places on the LC
             snr = np.array([snr])  # put this into a 1D array
             dt = t_series  # anywhere along the series has the same S/N and prob (ignoring edge effects)
 
         else:  # all other cases require sliding window
-            dt = (
-                ts[1] - ts[0]
-            )  # assume timestamps are uniformly sampled in the simulated LC
-            N_exp = max(
-                1, int(np.round(t_exp / dt))
-            )  # number of time steps in single exposure
-            single_exposure_snr = (
-                np.convolve(lc, np.ones(N_exp), mode="same") / N_exp / best_precision
-            )
+            dt = ts[1] - ts[0]  # assume timestamps are uniformly sampled in the simulated LC
+            N_exp = max(1, int(np.round(t_exp / dt)))  # number of time steps in single exposure
+            single_exposure_snr = np.convolve(lc, np.ones(N_exp), mode="same") / N_exp / best_precision
             # coverage = dt * len(single_exposure_snr)  # all points with non-zero S/N have prob>0
 
             if self.series_length == 1:
@@ -500,15 +388,11 @@ class Survey:
                 # Need to calculate the matched-filter result for several exposures.
                 # go over the single-image response and convolve that
                 # with the addition of multiple values from separate exposures
-                N_btw = int(
-                    np.round((t_exp + t_dead) / dt)
-                )  # number of steps between repeat exposures
+                N_btw = int(np.round((t_exp + t_dead) / dt))  # number of steps between repeat exposures
                 N_btw = max(N_btw, 1)
                 N_flare = int(np.round(best_t_flare / dt))
                 N_flare = max(N_flare, 1)
-                N_filter = min(
-                    N_flare * 5, int(N_btw * self.series_length)
-                )  # number of steps in filter
+                N_filter = min(N_flare * 5, int(N_btw * self.series_length))  # number of steps in filter
                 N_filter = max(N_filter, 1)
                 # if we only sample probabilities from a subset of the series
                 # then we must increase the total prob*dt later
@@ -517,9 +401,7 @@ class Survey:
                 # the filter samples the mid exposure with the correct dead time
                 matched_filter = np.zeros(N_filter)
                 matched_filter[N_exp // 2 :: N_btw] = 1
-                snr = np.sqrt(
-                    np.convolve(single_exposure_snr**2, matched_filter, mode="same")
-                )
+                snr = np.sqrt(np.convolve(single_exposure_snr**2, matched_filter, mode="same"))
 
                 # coverage = t_series / (dt * N_filter)
 
@@ -539,21 +421,13 @@ class Survey:
 
         # snr must be a 1D array of S/N for each time offset (possibly with one element)
         # now add a dimension for each precision value
-        snr = np.expand_dims(
-            snr, axis=0
-        )  # make this a 2D array, axes 0: distances, axis 1: timestamps
-        snr = (
-            snr * best_precision / np.expand_dims(precision, axis=1)
-        )  # broadcast to various values of precision
+        snr = np.expand_dims(snr, axis=0)  # make this a 2D array, axes 0: distances, axis 1: timestamps
+        snr = snr * best_precision / np.expand_dims(precision, axis=1)  # broadcast to various values of precision
 
         # snr is 2D, with axis 0 for precision values, axis 1 for time offsets (each may be 1 element)
         # now calculate the probabilities
-        prob = 0.5 * (
-            1 + scipy.special.erf(snr - self.threshold)
-        )  # assume Gaussian distribution
-        peak_prob = np.max(
-            prob, axis=1
-        )  # peak brightness of the flare assuming perfect timing
+        prob = 0.5 * (1 + scipy.special.erf(snr - self.threshold))  # assume Gaussian distribution
+        peak_prob = np.max(prob, axis=1)  # peak brightness of the flare assuming perfect timing
 
         # find the average probability to make a detection, and the average number of detections
         # now we must add the probability of a flare to be inside the span of the series
@@ -566,9 +440,7 @@ class Survey:
         # including the condition that flare is inside
         # each of the dt ranges
         mean_prob = np.sum(prob, axis=1) * dt / period * multiplicative_factor
-        mean_prob = np.minimum(
-            mean_prob, 1.0
-        )  # cannot exceed 1, although this should never happen
+        mean_prob = np.minimum(mean_prob, 1.0)  # cannot exceed 1, although this should never happen
         # there's no way to see more than one flare in this series,
         # so the average number of detections is just the probability to see one
         num_detections = mean_prob
@@ -577,25 +449,15 @@ class Survey:
             # if the flare occurs multiple times in a single visit/series, we must account for the fact
             # that the number of flares in the series is between N and N+1 (depending on fraction of period)
             num_flares_in_series = t_series // period
-            fraction = (
-                t_series % period / period
-            )  # fraction of period after num_flares were seen
+            fraction = t_series % period / period  # fraction of period after num_flares were seen
 
-            num_detections = mean_prob * (
-                num_flares_in_series + fraction
-            )  # average of N and N+1 with weight
+            num_detections = mean_prob * (num_flares_in_series + fraction)  # average of N and N+1 with weight
 
             # a simplifying assumption that for multiple flares in a series,
             # the peak_prob is the same for each flare.
-            prob1 = (
-                1 - (1 - mean_prob) ** num_flares_in_series
-            )  # at least one detection
-            prob2 = 1 - (1 - mean_prob) ** (
-                num_flares_in_series + 1
-            )  # at least one detection
-            mean_prob = (
-                prob1 * (1 - fraction) + prob2 * fraction
-            )  # weighted average of the two options
+            prob1 = 1 - (1 - mean_prob) ** num_flares_in_series  # at least one detection
+            prob2 = 1 - (1 - mean_prob) ** (num_flares_in_series + 1)  # at least one detection
+            mean_prob = prob1 * (1 - fraction) + prob2 * fraction  # weighted average of the two options
 
             # to count the average number of detections assume each detection has the same (peak) probability
 
@@ -636,9 +498,7 @@ class Survey:
                 break
 
         # marginalize over all angles
-        total_prob = np.sum(np.cos(np.deg2rad(dec)) * prob) / np.sum(
-            np.cos(np.deg2rad(dec))
-        )
+        total_prob = np.sum(np.cos(np.deg2rad(dec)) * prob) / np.sum(np.cos(np.deg2rad(dec)))
         best_prob = np.max(prob)
 
         return best_prob, total_prob
@@ -659,9 +519,7 @@ class Survey:
 
     def print(self):
         print(f"Survey name: {self.name}")
-        print(
-            f"filter: {self.filter} | limiting mag: {self.limmag:.2g} | precision: {self.precision:.3g}"
-        )
+        print(f"filter: {self.filter} | limiting mag: {self.limmag:.2g} | precision: {self.precision:.3g}")
         print(
             f"duration: {self.duration:.2g} year | cadence: {self.cadence:.2g} day | "
             f"duty cycle: {self.duty_cycle:.2g} | area: {self.field_area:.2g} deg^2"
@@ -671,8 +529,7 @@ class Survey:
             f"| slew time: {self.slew_time:.2g} s | series length: {self.series_length}"
         )
         print(
-            f"num fields: {self.num_fields} | num visits: {self.num_visits} | "
-            f"footprint: {self.footprint:.2g} sky"
+            f"num fields: {self.num_fields} | num visits: {self.num_visits} | " f"footprint: {self.footprint:.2g} sky"
         )
 
 
@@ -769,9 +626,7 @@ def setup_default_survey(name, kwargs):
         (21.0, 0.050, 0.218, 0.439, 0.983, 1.703),
     ]
     curios_chosen_exp_time = 15
-    idx = (
-        curios_exp_times.index(curios_chosen_exp_time) + 1
-    )  # plus one to account for the magnitude first element
+    idx = curios_exp_times.index(curios_chosen_exp_time) + 1  # plus one to account for the magnitude first element
     curios_precision = [1 / m[idx] for m in curios_mag_snr if m[idx] > 3.0]
     curios_mags = [m[0] for m in curios_mag_snr if m[idx] > 3.0]
 
@@ -798,7 +653,7 @@ def setup_default_survey(name, kwargs):
     lsst_mag = np.arange(10, 25, 1.0)
     lsst_rms = np.ones(len(lsst_mag)) * 0.01
     idx20 = np.where(lsst_mag == 20)[0][0]
-    print(idx20)
+
     # from https://iopscience.iop.org/article/10.3847/1538-4357/ab042c/pdf table 3, page 24
     # ref citation: https://ui.adsabs.harvard.edu/abs/2019ApJ...873..111I/abstract
     lsst_rms[idx20 + 1] = 0.01
