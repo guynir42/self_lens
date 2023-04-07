@@ -200,8 +200,11 @@ class Simulator:
         self.matrices = []
 
         if filenames is None:
-            if os.path.isdir("matrices"):
-                filenames = "matrices/*.npz"
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            folder_to_search = os.path.join(base_dir, "matrices")
+
+            if os.path.isdir(folder_to_search):
+                filenames = os.path.join(folder_to_search, "*.npz")
             else:
                 filenames = "matrix.npz"
 
@@ -434,7 +437,7 @@ class Simulator:
         """
         einstein_km = self.einstein_radius * 700000  # convert solar radii to km
 
-        scale_km = einstein_km
+        scale_km = einstein_km / 1.4  # 1.4 is a fudge factor
 
         # maximum length scale for lensing is lens+source size (already in einstein units)
         multiplier_star = 1 + self.source_size
