@@ -200,8 +200,8 @@ class Simulator:
         self.matrices = []
 
         if filenames is None:
-            if os.path.isdir("saved"):
-                filenames = "saved/*.npz"
+            if os.path.isdir("matrices"):
+                filenames = "matrices/*.npz"
             else:
                 filenames = "matrix.npz"
 
