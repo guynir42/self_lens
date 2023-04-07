@@ -24,8 +24,7 @@ if len(sys.argv) > 2:
 if len(sys.argv) > 3:
     T.step_dist = float(sys.argv[3])
 
-filename = f'saved/matrix_SR{T.min_source:.3f}-{T.max_source:.3f}_D{T.min_dist:.3f}-{T.max_dist:.3f}'
+filename = f"saved/matrix_SR{T.min_source:.3f}-{T.max_source:.3f}_D{T.min_dist:.3f}-{T.max_dist:.3f}"
 
 T.make_matrix()
 # T.save(filename)
-

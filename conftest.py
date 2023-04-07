@@ -19,20 +19,20 @@ def grid():
     g = grid_scan.Grid()
     g.setup_demo_scan(wd_lens=True)
     always_recalculate = True
-    if always_recalculate or not path.isfile('test_dataset.nc'):
+    if always_recalculate or not path.isfile("test_dataset.nc"):
         g.run_simulation(keep_systems=True)
-        g.dataset.to_netcdf('test_dataset.nc')
-        with open('test_systems.pickle', 'wb') as file:
+        g.dataset.to_netcdf("test_dataset.nc")
+        with open("test_systems.pickle", "wb") as file:
             pickle.dump(g.systems, file)
     else:
-        g.dataset = xr.load_dataset('test_grid_scan.nc')
+        g.dataset = xr.load_dataset("test_grid_scan.nc")
 
     return g
 
 
 @pytest.fixture
 def ztf():
-    return survey.Survey('ZTF')
+    return survey.Survey("ZTF")
 
 
 @pytest.fixture
@@ -42,25 +42,28 @@ def sim():
 
 @pytest.fixture
 def matrix():
-    return transfer_matrix.TransferMatrix.from_file('matrix.npz')
+    return transfer_matrix.TransferMatrix.from_file("matrix.npz")
 
 
 @pytest.fixture
 def matrix_large():
-    return transfer_matrix.TransferMatrix.from_file('saved/matrix_SR1.000-5.000_D0.000-20.000.npz')
+    return transfer_matrix.TransferMatrix.from_file(
+        "saved/matrix_SR1.000-5.000_D0.000-20.000.npz"
+    )
 
 
 @pytest.fixture
 def counting_matrix_factory():
-    def factory(min_dist=0,
-                max_dist=0.5,
-                step_dist=0.1,
-                min_source=0.1,
-                max_source=0.3,
-                step_source=0.1,
-                max_occulter=0.3,
-                step_occulter=0.3,
-                ):
+    def factory(
+        min_dist=0,
+        max_dist=0.5,
+        step_dist=0.1,
+        min_source=0.1,
+        max_source=0.3,
+        step_source=0.1,
+        max_occulter=0.3,
+        step_occulter=0.3,
+    ):
         T = transfer_matrix.TransferMatrix()
         T.min_dist = min_dist
         T.max_dist = max_dist

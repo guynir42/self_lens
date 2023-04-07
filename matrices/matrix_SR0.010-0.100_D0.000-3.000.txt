@@ -1,0 +1,1 @@
+distances= 0.0-3.0 (0.005 step) | source radii= 0.01-0.1 (0.005 step) | occulter radii= 0-2.0 (0.005 step) | num pixels= 1000000 | num points= 10000000 | calculation time= 18009.5s

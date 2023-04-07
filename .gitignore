@@ -1,6 +1,4 @@
 # project specific stuff
-saved/archive
-saved/fragments
 saved/*
 scripts/*.npz
 scripts/*.txt
