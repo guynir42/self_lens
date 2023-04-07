@@ -146,12 +146,8 @@ class TransferMatrix:
             5,
         )
 
-        num_radii = int(
-            np.round((self.max_source - self.min_source) / self.step_source) + 1
-        )
-        self.source_radii = np.round(
-            np.linspace(self.min_source, self.max_source, num_radii, endpoint=True), 5
-        )
+        num_radii = int(np.round((self.max_source - self.min_source) / self.step_source) + 1)
+        self.source_radii = np.round(np.linspace(self.min_source, self.max_source, num_radii, endpoint=True), 5)
 
         num_occulters = int(np.round(self.max_occulter / self.step_occulter) + 1)
         self.occulter_radii = np.round(
@@ -195,8 +191,10 @@ class TransferMatrix:
         Will calculate the result for each annulus on the source, up to the maximum source radii.
         This function takes a long time to run (possibly hours).
 
-        :param plotting: if true, will produce a surface plot of the lensed geometry for each iteration
-        :return: None
+        Parameters
+        ----------
+        plotting: bool
+            If true, will produce a surface plot of the lensed geometry for each iteration
         """
 
         print("calculating matrix! ")
@@ -213,13 +211,9 @@ class TransferMatrix:
 
             for j, source_radius in enumerate(self.source_radii):
 
-                (z1x, z1y, z2x, z2y) = draw_contours(
-                    d, source_radius, points=self.num_points
-                )
+                (z1x, z1y, z2x, z2y) = draw_contours(d, source_radius, points=self.num_points)
 
-                if (
-                    d < source_radius
-                ):  # small image inside big one, need single map with image+hole
+                if d < source_radius:  # small image inside big one, need single map with image+hole
                     (im, x_grid, y_grid, resolution) = make_surface_with_hole(
                         z1x,
                         z1y,
@@ -278,9 +272,7 @@ class TransferMatrix:
                     if k == 0 or np.any(changed_flag):  # must calculate sums
                         for m in range(len(im)):
                             self.flux[k, j, i] += np.sum(im[m]) * 2 / resolution[m] ** 2
-                            self.moment[k, j, i] += (
-                                np.sum(im[m] * (x_grid[m] - d)) * 2 / resolution[m] ** 2
-                            )
+                            self.moment[k, j, i] += np.sum(im[m] * (x_grid[m] - d)) * 2 / resolution[m] ** 2
                     else:  # neither image was changed
                         self.flux[k, j, i] = self.flux[k - 1, j, i]
                         self.moment[k, j, i] = self.moment[k - 1, j, i]
@@ -308,9 +300,7 @@ class TransferMatrix:
 
             self.calc_time = timer() - t1
 
-            print(
-                f"{i+1:3d}/{self.distances.size} | Distance= {d} | runtime = {self.calc_time:.1f}s"
-            )
+            print(f"{i+1:3d}/{self.distances.size} | Distance= {d} | runtime = {self.calc_time:.1f}s")
 
         self.flux = np.diff(self.flux, axis=1, prepend=0)
         self.input_flux = np.diff(self.input_flux, axis=1, prepend=0)
@@ -321,9 +311,7 @@ class TransferMatrix:
         self.complete = True
         self.timestamp = str(datetime.utcnow())
 
-    def radial_lightcurve(
-        self, source, distances=None, occulter_radius=0, pixels=1e6, get_offsets=False
-    ):
+    def radial_lightcurve(self, source, distances=None, occulter_radius=0, pixels=1e6, get_offsets=False):
         """
         :param source:
             Give the size of the source, or a brightness profile
@@ -367,9 +355,7 @@ class TransferMatrix:
 
         # figure out the stellar light profile
         N = self.flux.shape[1]  # number of source radii
-        profile_frac = (
-            1  # the relative weight between first and second profiles (if given!)
-        )
+        profile_frac = 1  # the relative weight between first and second profiles (if given!)
         if isinstance(source, StarProfile):
             star_profile = source.get_matrix()
         elif type(source) is np.ndarray:
@@ -405,10 +391,7 @@ class TransferMatrix:
                 )
 
         else:
-            raise TypeError(
-                'Must provide "source" input as a numeric scalar, '
-                f"a list, or an array (of size {N}). "
-            )
+            raise TypeError('Must provide "source" input as a numeric scalar, ' f"a list, or an array (of size {N}). ")
 
         # star_profile /= np.sum(star_profile, axis=1, keepdims=True)  # normalize to unity
 
@@ -435,12 +418,8 @@ class TransferMatrix:
                 self.occulter_radii[idx[1]] - self.occulter_radii[idx[0]]
             )
 
-        flux = self.interp_on_profile(
-            self.flux[idx, :, :], star_profile, profile_frac, occulter_frac
-        )
-        in_flux = self.interp_on_profile(
-            self.input_flux[idx, :, :], star_profile, profile_frac, occulter_frac
-        )
+        flux = self.interp_on_profile(self.flux[idx, :, :], star_profile, profile_frac, occulter_frac)
+        in_flux = self.interp_on_profile(self.input_flux[idx, :, :], star_profile, profile_frac, occulter_frac)
         mag = flux / in_flux
 
         if distances is not None:
@@ -450,9 +429,7 @@ class TransferMatrix:
         if not get_offsets:
             return mag
         else:
-            moments = self.interp_on_profile(
-                self.moment[idx, :, :], star_profile, profile_frac, occulter_frac
-            )
+            moments = self.interp_on_profile(self.moment[idx, :, :], star_profile, profile_frac, occulter_frac)
             offsets = moments / flux
 
             if distances is not None:
@@ -569,9 +546,7 @@ class TransferMatrix:
         """
 
         if not isinstance(other, TransferMatrix):
-            raise TypeError(
-                f"Must give a TransferMatrix to __add__(). Was given a {type(other)} instead..."
-            )
+            raise TypeError(f"Must give a TransferMatrix to __add__(). Was given a {type(other)} instead...")
 
         if not self.complete and not other.complete:
             raise ValueError("Both operands to addition of matrices are incomplete!")
@@ -607,12 +582,8 @@ class TransferMatrix:
 
         new.distances = np.append(self.distances[:end_idx], other.distances)
         new.flux = np.append(self.flux[:, :, :end_idx], other.flux, axis=2)
-        new.input_flux = np.append(
-            self.input_flux[:, :, :end_idx], other.input_flux, axis=2
-        )
-        new.magnification = np.append(
-            self.magnification[:, :, :end_idx], other.magnification, axis=2
-        )
+        new.input_flux = np.append(self.input_flux[:, :, :end_idx], other.input_flux, axis=2)
+        new.magnification = np.append(self.magnification[:, :, :end_idx], other.magnification, axis=2)
         new.moment = np.append(self.moment[:, :, :end_idx], other.moment, axis=2)
 
         new.min_dist = self.min_dist
@@ -650,9 +621,7 @@ class TransferMatrix:
         self.flux = self.flux[:, 0 : N[1] : 2, :] + self.flux[:, 1::2, :]
         self.flux = self.flux[0 : N[0] : 2, :, 0 : N[2] : 2]
 
-        self.input_flux = (
-            self.input_flux[:, 0 : N[1] : 2, :] + self.input_flux[:, 1::2, :]
-        )
+        self.input_flux = self.input_flux[:, 0 : N[1] : 2, :] + self.input_flux[:, 1::2, :]
         self.input_flux = self.input_flux[0 : N[0] : 2, :, 0 : N[2] : 2]
 
         self.moment = self.moment[:, 0 : N[1] : 2, :] + self.moment[:, 1::2, :]
@@ -662,9 +631,7 @@ class TransferMatrix:
         self.magnification = self.flux / self.input_flux
 
         self.occulter_radii = self.occulter_radii[0 : N[0] : 2]
-        self.source_radii = (
-            self.source_radii[0 : N[1] : 2] + self.source_radii[1::2]
-        ) / 2
+        self.source_radii = (self.source_radii[0 : N[1] : 2] + self.source_radii[1::2]) / 2
         self.distances = self.distances[0 : N[2] : 2]
 
         self.step_dist *= 2
@@ -697,9 +664,7 @@ class StarProfile:
         if profile == "uniform":
             self.surface_brightness[source_radius >= self.radii] = 1
         else:
-            raise KeyError(
-                f'Unknown star profile "{profile}". ' 'Use "unform", etc... '
-            )
+            raise KeyError(f'Unknown star profile "{profile}". ' 'Use "unform", etc... ')
 
     def get_matrix(self):
         """
@@ -752,15 +717,9 @@ def draw_contours(distance, source_radius, points=1e5, plotting=False):
     epsilon = np.abs(distance - source_radius)
 
     if epsilon < 0.3:
-        th1 = (
-            np.linspace(0, 1 - 2 * epsilon, int(np.ceil(points / 2)), endpoint=False)
-            * np.pi
-        )
+        th1 = np.linspace(0, 1 - 2 * epsilon, int(np.ceil(points / 2)), endpoint=False) * np.pi
         th1 = np.append(-th1, th1, axis=0)
-        th2 = (
-            np.geomspace(1 - 2 * epsilon, 1, int(np.ceil(points / 2)), endpoint=False)
-            * np.pi
-        )
+        th2 = np.geomspace(1 - 2 * epsilon, 1, int(np.ceil(points / 2)), endpoint=False) * np.pi
         th2 = np.append(-th2, th2, axis=0)
         th = np.append(th1, th2, axis=0)
         th = np.sort(th)
@@ -786,9 +745,7 @@ def draw_contours(distance, source_radius, points=1e5, plotting=False):
     # adding a contour along one side of the lens
     # for each image, either internally or externally
     if epsilon < 0.001:
-        th_right = (
-            np.linspace(-1, 1, int(np.ceil(points / 2)), endpoint=False) * np.pi / 2
-        )
+        th_right = np.linspace(-1, 1, int(np.ceil(points / 2)), endpoint=False) * np.pi / 2
         flip = 1
         if distance < source_radius:
             flip = -1
@@ -904,9 +861,7 @@ def make_surface_one_image(
 
     z1x_ind = np.round((z1x - left) * resolution).astype(int)
     z1y_ind = np.round(z1y * resolution).astype(int)
-    good_indices = (
-        (z1x_ind >= 0) & (z1x_ind < width) & (z1y_ind >= 0) & (z1y_ind < height)
-    )
+    good_indices = (z1x_ind >= 0) & (z1x_ind < width) & (z1y_ind >= 0) & (z1y_ind < height)
     z1x_ind = z1x_ind[good_indices]
     z1y_ind = z1y_ind[good_indices]
 
@@ -1045,9 +1000,7 @@ def make_surface_with_hole(
 
     z1x_ind = np.round((z1x - left) * resolution).astype(int)
     z1y_ind = np.round(z1y * resolution).astype(int)
-    good_indices = (
-        (z1x_ind >= 0) & (z1x_ind < width) & (z1y_ind >= 0) & (z1y_ind < height)
-    )
+    good_indices = (z1x_ind >= 0) & (z1x_ind < width) & (z1y_ind >= 0) & (z1y_ind < height)
     z1x_ind = z1x_ind[good_indices]
     z1y_ind = z1y_ind[good_indices]
 
@@ -1055,9 +1008,7 @@ def make_surface_with_hole(
 
     z2x_ind = np.round((z2x - left) * resolution).astype(int)
     z2y_ind = np.round(z2y * resolution).astype(int)
-    good_indices = (
-        (z2x_ind >= 0) & (z2x_ind < width) & (z2y_ind >= 0) & (z2y_ind < height)
-    )
+    good_indices = (z2x_ind >= 0) & (z2x_ind < width) & (z2y_ind >= 0) & (z2y_ind < height)
     z2x_ind = z2x_ind[good_indices]
     z2y_ind = z2y_ind[good_indices]
 
@@ -1104,9 +1055,7 @@ def make_surface_with_hole(
     return im, x_grid, y_grid, resolution
 
 
-def remove_occulter(
-    im, occulter_radius, r_squared_grid, plotting=False, return_changed_flag=False
-):
+def remove_occulter(im, occulter_radius, r_squared_grid, plotting=False, return_changed_flag=False):
     """
     Find areas of the image of the source that are supposed to be occulted
     by the physical size of the lens, and replace any True values in that image
@@ -1255,15 +1204,9 @@ def single_geometry(
     offset = 0
     for i in range(len(im)):  # go over one or two images
         if occulter_radius > 0:
-            im[i] = remove_occulter(
-                im[i], occulter_radius, x_grid[i] ** 2 + y_grid[i] ** 2
-            )
+            im[i] = remove_occulter(im[i], occulter_radius, x_grid[i] ** 2 + y_grid[i] ** 2)
         mag += np.sum(im[i]) * 2 / (np.pi * source_radius**2 * resolution[i] ** 2)
-        offset += (
-            np.sum(im[i] * (x_grid[i] - distance))
-            * 2
-            / (np.pi * source_radius**2 * resolution[i] ** 2)
-        )
+        offset += np.sum(im[i] * (x_grid[i] - distance)) * 2 / (np.pi * source_radius**2 * resolution[i] ** 2)
 
     offset /= mag
 
@@ -1383,10 +1326,7 @@ def radial_lightcurve(
         )
 
         if verbosity > 0:
-            print(
-                f"i= {i}/{distances.size}: d= {d:.2f} "
-                f"| mag= {mag[i]:.3f} | offset= {offset[i]:.3f}"
-            )
+            print(f"i= {i}/{distances.size}: d= {d:.2f} " f"| mag= {mag[i]:.3f} | offset= {offset[i]:.3f}")
 
     if get_offsets:
         return mag, offset
@@ -1501,9 +1441,7 @@ def plot_geometry(
         x3 = occulter_radius * np.cos(np.linspace(0, 2 * np.pi, num_points))
         y3 = occulter_radius * np.sin(np.linspace(0, 2 * np.pi, num_points))
 
-        out_of_bounds = (
-            (im_left > x3) | (x3 > im_right) | (im_bottom > y3) | (y3 > im_top)
-        )
+        out_of_bounds = (im_left > x3) | (x3 > im_right) | (im_bottom > y3) | (y3 > im_top)
         x3[out_of_bounds] = np.NAN
         y3[out_of_bounds] = np.NAN
 
@@ -1558,9 +1496,7 @@ def distance_for_precision(precision):
     return np.sqrt(2 / (t + np.sqrt(t)))
 
 
-def large_source_approximation(
-    distances, source_radius, occulter_radius=0, edge_correction=True
-):
+def large_source_approximation(distances, source_radius, occulter_radius=0, edge_correction=True):
     """
 
     :param distances:
@@ -1576,56 +1512,28 @@ def large_source_approximation(
     if occulter_radius == 0 and not edge_correction:
         # equation (5)
         mag = 2 * source_radius ** (-2) - (occulter_radius / source_radius) ** 2
-        mag = 1 + mag * (
-            distances < source_radius
-        )  # only magnify inside the source disk
+        mag = 1 + mag * (distances < source_radius)  # only magnify inside the source disk
 
     elif occulter_radius == 0 and edge_correction:
         # equation (6) corrects for edge effects
         k = (1 + ((distances - source_radius) ** 2) / 4) ** (-1 / 2)
         # note that the scipy integrals take m=k^2
         ellip = scipy.special.ellipk(k**2) - scipy.special.ellipe(k**2)
-        mag = (
-            1
-            + 1 / source_radius**2
-            - 2 * (distances - source_radius) / (np.pi * source_radius**2 * k) * ellip
-        )
+        mag = 1 + 1 / source_radius**2 - 2 * (distances - source_radius) / (np.pi * source_radius**2 * k) * ellip
 
     elif occulter_radius > 0:
         # equation (7)
         k = (1 + ((distances - source_radius) ** 2) / 4) ** (-1 / 2)
         zeta = source_radius - distances
         conditional = np.abs(zeta) * occulter_radius < np.abs(1 - occulter_radius**2)
-        argument = (
-            conditional
-            * np.abs(zeta)
-            * occulter_radius
-            / np.abs(1 - occulter_radius**2)
-            + ~conditional
-        )
+        argument = conditional * np.abs(zeta) * occulter_radius / np.abs(1 - occulter_radius**2) + ~conditional
         phi = np.arccos(argument)
         G_90 = zeta / k * (scipy.special.ellipk(k**2) - scipy.special.ellipe(k**2))
-        G_phi = (
-            zeta
-            / k
-            * (
-                scipy.special.ellipkinc(phi, k**2)
-                - scipy.special.ellipeinc(phi, k**2)
-            )
-        )
+        G_phi = zeta / k * (scipy.special.ellipkinc(phi, k**2) - scipy.special.ellipeinc(phi, k**2))
         inside_sqrt = np.sqrt(zeta**2 + 4 * np.cos(phi) ** 2)
         first = np.sign(zeta) * (np.pi / 2 - phi) * (1 - occulter_radius**2)
-        middle = (
-            -np.pi / 2 * occulter_radius**2
-            + G_90
-            - np.sign(occulter_radius - 1) * G_phi
-        )
-        last = (
-            -zeta
-            / 2
-            * np.tan(phi)
-            * (np.abs(zeta) + np.sign(occulter_radius - 1) * inside_sqrt)
-        )
+        middle = -np.pi / 2 * occulter_radius**2 + G_90 - np.sign(occulter_radius - 1) * G_phi
+        last = -zeta / 2 * np.tan(phi) * (np.abs(zeta) + np.sign(occulter_radius - 1) * inside_sqrt)
         B = first + middle + last
         mag = 1 + (1 + B / np.pi) / source_radius**2
 
