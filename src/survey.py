@@ -16,16 +16,14 @@ MIN_DIST_PC = 10
 class Survey:
     def __init__(self, name, **kwargs):
         """
-        A survey must have some basic information defined so it can be used
+        A survey must have some basic information defined, so it can be used
         to estimate the detectability of different self lensing systems.
-        Each parameter is defined below, but here's a list of the necessary
-
-        Input keywords necessary to generate a valid survey are:
+        Each parameter is defined below, but here's a list of the necessary keywords:
         location, field_area, exposure_time, cadence, footprint, limmag, precision,
 
         Another option is to provide one of the following preset survey names:
-        ZTF, TESS, ASASSN, W-FAST,
-        which will automatically fill the required fields using the default data.
+        ZTF, TESS, LSST, CURIOS, or LAST, which will automatically fill the
+        required fields using the default data.
         Any keywords provided in addition to a name that's on the default list,
         will be used to override the default values.
         """
@@ -158,8 +156,10 @@ class Survey:
         """
         Find the detection probability for the given system and this survey,
         assuming the system is placed at different distances.
-        :param system:
-            A list of simulator.System objects.
+
+        Parameters
+        ----------
+        system: A list of simulator.System objects.
             Each one should contain the physical properties of the system:
             - mass of the lens and source.
             - total (bolometric) flux of lens and source.
@@ -172,7 +172,8 @@ class Survey:
             each Survey object. This includes one dictionary called distances,
             one dictionary called volumes, one dictionary called det_prob.
             Each item in the dictionary would be for a different survey.
-
+        plotting: bool
+            If True, make a plot of the magnification and S/N light curve. Default is False.
         """
 
         # these are the null values for a system that cannot be detected at all (i.e., an early return statement)
@@ -312,44 +313,47 @@ class Survey:
 
     def calc_prob(self, lc, ts, precision, best_precision, best_t_flare, period, plotting=False):
         """
-        For a given lightcurve calculate the S/N and time coverage.
-        In some cases the S/N is just one number, while in other cases
-        it is an array with values for each time offset between the
-        exposure and the flare time.
-        The S/N is converted to probability, either the peak_prob,
-        which is the probability to find a peak assuming perfect timing
-        of exposure on top of the flare, and the mean_prob which is
-        the average probability to find a flare assuming a uniform
-        distribution of timing offsets over the entire orbit.
+         For a given lightcurve calculate the S/N and time coverage.
+         In some cases the S/N is just one number, while in other cases
+         it is an array with values for each time offset between the
+         exposure and the flare time.
+         The S/N is converted to probability, either the peak_prob,
+         which is the probability to find a peak assuming perfect timing
+         of exposure on top of the flare, and the mean_prob which is
+         the average probability to find a flare assuming a uniform
+         distribution of timing offsets over the entire orbit.
 
-        :param lc: float array
-            lightcurve array of the flare.
-        :param ts: float array
-            timestamps array (must be the same size as "lc", must be uniformly sampled).
-        :param precision: float array
-            precision array, for each distance the system can be.
-        :param best_precision: float scalar
-            the best precision of the survey, to find the S/N and rescale to all other values of precision.
-        :param best_t_flare: float scalar
-            the maximal flare duration, measured at the best precision, to set the scale for S/N calculations.
-        :param period: float scalar
-            the orbital period of the flares, in seconds
+         Parameters
+         ----------
+         lc: float array
+             lightcurve array of the flare.
+         ts: float array
+             timestamps array (must be the same size as "lc", must be uniformly sampled).
+         precision: float array
+             precision array, for each distance the system can be.
+         best_precision: float scalar
+             the best precision of the survey, to find the S/N and rescale to all other values of precision.
+         best_t_flare: float scalar
+             the maximal flare duration, measured at the best precision, to set the scale for S/N calculations.
+         period: float scalar
+             the orbital period of the flares, in seconds
 
-        :return: 3-tuple
-           peak_prob: the probability to find the flare if the timing is ideal
-                       (i.e., the exposure is right on the peak).
-           mean_prob: the probability to find a flare, averaged over all possible
-                       timing offsets in the orbital period (uniform phase).
-                       If the series length is longer than one orbit, then the
-                       probability is for getting at least one detection.
-           num_detections: average number of detections per visit.
-                           For a single exposure, this is just equal to mean_prob.
-                           For multiple exposures, if the series is larger than
-                           the orbital period, the number of detections is set
-                           by the average number of flares in a series,
-                           multiplied by the peak probability
-                           (so it assumes the peak probability is the same
-                           for each flare in the series).
+         Returns
+         -------
+        peak_prob: the probability to find the flare if the timing is ideal
+                    (i.e., the exposure is right on the peak).
+        mean_prob: the probability to find a flare, averaged over all possible
+                    timing offsets in the orbital period (uniform phase).
+                    If the series length is longer than one orbit, then the
+                    probability is for getting at least one detection.
+        num_detections: average number of detections per visit.
+                        For a single exposure, this is just equal to mean_prob.
+                        For multiple exposures, if the series is larger than
+                        the orbital period, the number of detections is set
+                        by the average number of flares in a series,
+                        multiplied by the peak probability
+                        (so it assumes the peak probability is the same
+                        for each flare in the series).
 
         """
         t_exp = self.exposure_time
@@ -471,17 +475,20 @@ class Survey:
         The total_prob is the weighted average probability given
         the uniform distribution of sin(dec)=cos(i).
 
-        :param sim:
+        Parameters
+        ----------
+        sim: Simulator
             A working Simulator object from simulator module.
-        :param num_points:
+        num_points: int
             The number of declination points to sample
             between 0 and 90 degrees. In general, the loop
             never samples all points, because at low declinations
             of a few degrees (at most) the probability drops to
             zero and the loop is cut short.
 
-        :return:
-            a 2-tuple with best_prob and total_prob.
+        Returns
+        -------
+            2-tuple with best_prob and total_prob.
         """
 
         num_points = int(num_points)
@@ -504,11 +511,48 @@ class Survey:
         return best_prob, total_prob
 
     def binomial_prob(self, num_hits, num_tries, base_prob):
+        """
+        Calculate the probability of getting num_hits hits out of num_tries
+
+        Parameters
+        ----------
+        num_hits: int
+            Number of hits required.
+        num_tries: int
+            Number of tries / repetitions.
+        base_prob: float
+            Probability of a single hit (between 0 and 1).
+
+        Returns
+        -------
+        float
+            The probability of getting num_hits hits out of num_tries
+        """
+
         binomials = scipy.special.comb(num_tries, num_hits, exact=True)
         probs = base_prob**num_hits * (1 - base_prob) ** (num_tries - num_hits)
         return binomials * probs
 
     def binomial_cumulative(self, min_num_hits, num_tries, base_prob):
+        """
+        Calculate the cumulative probability of getting min_num_hits
+        and all higher numbers of hits out of num_tries.
+
+        Parameters
+        ----------
+        min_num_hits: int
+            Minimum number of hits required.
+        num_tries: int
+            Number of tries / repetitions.
+        base_prob: float
+            Probability of a single hit (between 0 and 1).
+
+        Returns
+        -------
+        float
+            The cumulative probability of getting min_num_hits
+            and all higher numbers of hits out of num_tries.
+        """
         # find the total prob. of finding all the num_hits lower than min_num_hits
         prob_sum = 0
         for i in range(min_num_hits):
