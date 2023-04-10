@@ -196,28 +196,49 @@ class Simulator:
         self._time_units = new_units
 
     def load_matrices(self, filenames=None):
+        """
+        Load transfer matrices from file.
+        If no filenames are given, it will look for a folder
+        called "matrices" in the root folder,
+        and load all .npz files in that folder.
 
+        Parameters
+        ----------
+        filenames: str or list of str
+            Filenames to load. If None, will look for a folder
+            called "matrices" in the root folder and grab all
+            .npz files in that folder.
+
+        """
         self.matrices = []
 
+        if isinstance(filenames, str):
+            filenames = [filenames]
+
         if filenames is None:
-            if os.path.isdir("saved"):
-                filenames = "saved/*.npz"
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            folder_to_search = os.path.join(base_dir, "matrices")
+
+            if os.path.isdir(folder_to_search):
+                filenames = os.path.join(folder_to_search, "*.npz")
             else:
                 filenames = "matrix.npz"
 
-        filenames = glob.glob(filenames)
+            filenames = glob.glob(filenames)
 
         for f in filenames:
             self.matrices.append(TransferMatrix.from_file(f))
 
         self.matrices = sorted(self.matrices, key=lambda mat: mat.max_source)
 
-    def translate_type(self, type):
-
-        if type is None:
+    def translate_type(self, type_):
+        """
+        Translate the type of compact object into a standard format.
+        """
+        if type_ is None:
             return None
 
-        t = type.lower().replace("_", " ").strip()
+        t = type_.lower().replace("_", " ").strip()
 
         if t == "ms" or t == "main sequence" or t == "star":
             t = "MS"
@@ -228,24 +249,55 @@ class Simulator:
         elif t == "bh" or t == "black hole":
             t = "BH"
         else:
-            raise ValueError(f'Unknown object type "{type}". Use "MS" or "WD" or "NS" or "BH"...')
+            raise ValueError(f'Unknown object type "{type_}". Use "MS" or "WD" or "NS" or "BH"...')
 
         return t
 
     def input(self, **kwargs):
+        """
+        Parse some input parameters into the class.
 
+        Optional Parameters
+        -------------------
+        star_mass: float
+            Mass of the source object in solar masses.
+        star_type: str
+            Type of the source object. Can be "MS" or "WD" or "NS" or "BH".
+        star_size: float
+            Size of the source object in solar radii.
+        star_temp: float
+            Temperature of the source object in Kelvin.
+        star_flux: float
+            Flux of the source object in erg/s.
+        lens_mass: float
+            Mass of the lensing object in solar masses.
+        lens_type: str
+            Type of the lensing object. Can be "MS" or "WD" or "NS" or "BH".
+        lens_size: float
+            Size of the lensing object in solar radii.
+        lens_temp: float
+            Temperature of the lensing object in Kelvin.
+        lens_flux: float
+            Flux of the lensing object in erg/s.
+        declination: float
+            Declination of the source object in degrees (90-inclination)
+        inclination: float
+            Inclination of the lensing object in degrees (90-declination)
+        semimajor_axis: float
+            Semimajor axis of the lensing object in AU.
+        orbital_period: float
+            Orbital period of the lensing object in days.
+        time_units: str
+            Units of the timestamps. Can be "days" or "years" or "seconds". Default is "days".
+        compact_source: bool
+            Whether the source object is compact or not. Default is True.
+
+        """
         for key, val in kwargs.items():
             if (
                 hasattr(self, key)
                 and re.match("(star|lens)_.*", key)
-                or key
-                in (
-                    "declination",
-                    "inclination",
-                    "semimajor_axis",
-                    "time_units",
-                    "compact_source",
-                )
+                or key in ("declination", "inclination", "semimajor_axis", "time_units", "compact_source")
             ):
                 setattr(self, key, val)
             elif key == "orbital_period":
@@ -306,7 +358,20 @@ class Simulator:
         self.position_angles = np.arctan2(y, x)
 
     def choose_matrix(self, source_size=None):
+        """
+        Choose a transfer matrix based on the source size.
 
+        Parameters
+        ----------
+        source_size : float
+            The source size in units of the Einstein radius.
+
+        Returns
+        -------
+        matrix : TransferMatrix
+            The transfer matrix that is appropriate for the given source size.
+
+        """
         if source_size is None:
             source_size = self.source_size
         matrix_list = sorted(self.matrices, key=lambda x: x.max_source, reverse=False)
@@ -343,7 +408,43 @@ class Simulator:
         return width / velocity
 
     def calculate(self, **kwargs):
-
+        """
+        Parse the input parameters and calculate the light curve.
+        Optional Parameters
+        -------------------
+        star_mass: float
+            Mass of the source object in solar masses.
+        star_type: str
+            Type of the source object. Can be "MS" or "WD" or "NS" or "BH".
+        star_size: float
+            Size of the source object in solar radii.
+        star_temp: float
+            Temperature of the source object in Kelvin.
+        star_flux: float
+            Flux of the source object in erg/s.
+        lens_mass: float
+            Mass of the lensing object in solar masses.
+        lens_type: str
+            Type of the lensing object. Can be "MS" or "WD" or "NS" or "BH".
+        lens_size: float
+            Size of the lensing object in solar radii.
+        lens_temp: float
+            Temperature of the lensing object in Kelvin.
+        lens_flux: float
+            Flux of the lensing object in erg/s.
+        declination: float
+            Declination of the source object in degrees (90-inclination)
+        inclination: float
+            Inclination of the lensing object in degrees (90-declination)
+        semimajor_axis: float
+            Semimajor axis of the lensing object in AU.
+        orbital_period: float
+            Orbital period of the lensing object in days.
+        time_units: str
+            Units of the timestamps. Can be "days" or "years" or "seconds". Default is "days".
+        compact_source: bool
+            Whether the source object is compact or not. Default is True.
+        """
         t0 = timer()
         if "timestamps" in kwargs:
             timestamps = kwargs.pop("timestamps")
@@ -402,7 +503,10 @@ class Simulator:
         return self.magnifications
 
     def get_fwhm(self):
-
+        """
+        Estimate the Full Width at Half Maximum (FWHM) of the flare
+        in the current light-curve.
+        """
         lc = self.magnifications - 1
         ts = self.timestamps
 
@@ -431,10 +535,22 @@ class Simulator:
         Find the length scale (in km) away from perfect alignment where
         a lens can be relative to the source and still have magnification
         brighter than precision times threshold.
+
+        Parameters
+        ----------
+        precision: float
+            The precision of the measurement.
+            This is the fractional noise level of individual measurements.
+            Default is 0.01, which is 1% noise out of the mean flux.
+        threshold: float
+            The threshold of the measurement, which is how
+            many times the signal needs to be relative to the
+            noise (or precision) to be detected.
+
         """
         einstein_km = self.einstein_radius * 700000  # convert solar radii to km
 
-        scale_km = einstein_km
+        scale_km = einstein_km / 1.4  # 1.4 is a fudge factor
 
         # maximum length scale for lensing is lens+source size (already in einstein units)
         multiplier_star = 1 + self.source_size
@@ -449,6 +565,17 @@ class Simulator:
         The probability of this system to be detectable, assuming best
         possible timing (or continuous coverage).
         Does not consider the effects of lens occultation.
+
+        Parameters
+        ----------
+        precision: float
+            The precision of the measurement.
+            This is the fractional noise level of individual measurements.
+            Default is 0.01, which is 1% noise out of the mean flux.
+        threshold: float
+            The threshold of the measurement, which is how
+            many times the signal needs to be relative to the
+            noise (or precision) to be detected.
         """
 
         scale_km = self.length_scale_estimate(precision, threshold)
@@ -460,6 +587,17 @@ class Simulator:
         """
         Get a back-of-the-envelope estimate for the single visit probability,
         when marginalizing over all declinations / inclinations.
+
+        Parameters
+        ----------
+        precision: float
+            The precision of the measurement.
+            This is the fractional noise level of individual measurements.
+            Default is 0.01, which is 1% noise out of the mean flux.
+        threshold: float
+            The threshold of the measurement, which is how
+            many times the signal needs to be relative to the
+            noise (or precision) to be detected.
 
         """
         scale_km = self.length_scale_estimate(precision, threshold)
@@ -474,6 +612,7 @@ class Simulator:
         return total_prob_estimate
 
     def make_gui(self):
+        """Make a Graphical User Interface (GUI)."""
         self.gui = self.GUI(self)
 
     class GraphicButton:
@@ -911,7 +1050,8 @@ class System:
         Get the absolute magnitude of the system, not including the magnification.
         The magnitude is bolometric (includes all wavelengths).
 
-        :return:
+        Returns
+        -------
             Magnitude measured on Earth for this system at 10pc.
         """
 
@@ -925,14 +1065,19 @@ class System:
         Find the absolute (10 pc) magnitude of the system in AB magnitudes
         for the filter specified by wavelength and bandwidth.
 
-        :param wavelength: scalar float
+        Parameters
+        ----------
+        wavelength: scalar float
             central wavelength of the filter (assume tophat) in nm.
-        :param bandwidth: scalar float
+        bandwidth: scalar float
             width of the filter in nm.
-        :param get_dilution: boolean
+        get_dilution: boolean
             if True will return a 2-tuple with the magnitude and
             the dilution factor of the system.
-        :return: 2-tuple or scalar
+
+        Returns
+        -------
+        2-tuple or scalar
             if get_dilution is True:
             - the magnitude in AB system based on the provided filter,
                 for a system at 10pc.
@@ -981,15 +1126,21 @@ class System:
     def apply_distance(self, abs_mag, distance, wavelength=None, bandwidth=None):
         """
         Apply a distance modulus (and possibly extinction) to
-        :param abs_mag: float array or scalar
+        the absolute magnitude of the system.
+
+        Parameters
+        ----------
+        abs_mag: float array or scalar
             absolute magnitude (at 10pc) of the system.
             can be a scalar or array, but the two first
             inputs must be braodcastable.
-        :param distance: float array or scalar
+        distance: float array or scalar
             distance to the system in pc.
-        :param wavelength: tbd
-        :param bandwidth: tbd
-        :return:
+        wavelength: tbd
+        bandwidth: tbd
+
+        Returns
+        -------
             the magnitude after applying the
             decrease in the amount of light
             due to the distance (1/r^2 law)
@@ -1014,17 +1165,22 @@ class System:
         each distance by an amount that reflects the change in brightness.
         The scaling of distance is then translated to scaling of volume.
 
-        :param temp1: scalar float
+        Parameters
+        ----------
+        temp1: scalar float
             current temperature of the dominant body in the system.
-        :param temp2: scalar float
+        temp2: scalar float
             new temperature of the dominant body (assume the second body
             either stays sub-dominant or otherwise has similar temperature
             to the dominant one, before and after the transformation).
-        :param wavelength: scalar float
+        wavelength: scalar float
             central wavelength of filter passband (in nm).
-        :param bandwidth: scalar float
+        bandwidth: scalar float
             width of the filter passband (in nm).
-        :return: scalar float
+
+        Returns
+        -------
+        scalar float
             scaling factor of the effective volume.
         """
         c_nm = 2.99792458e17  # speed of light in nm/s
@@ -1045,16 +1201,20 @@ class System:
         """
         Black body radiation per frequency.
 
-        :param f: float array or scalar
+        Parameters
+        ----------
+        f: float array or scalar
             Array or scalar of frequencies (in Hz).
-        :param temp: float array or scalar
+        temp: float array or scalar
             Array or scalar of frequencies (in Kelvin).
             The two first inputs must be broadcastable.
-        :param photons: bool
+        photons: bool
             When true, will return the number of photons
             in this frequency range, instead of the
             flux spectral density.
-        :return:
+
+        Returns
+        -------
             The flux spectral density in units of
             ergs per second per cm^2 per Hz per steradian.
             If photons=True will instead give
@@ -1080,11 +1240,16 @@ class System:
         Get a correction term to translate the bolometric magnitude
         to the one measured by the filter.
 
-        :param wavelength:
+        Parameters
+        ----------
+        wavelength: float
             Central wavelength of filter (if None, will assume broadband)
-        :param bandwidth:
+        bandwidth: float
             Spectral width of filter (if None, will assume broadband)
-        :return 2-tuple:
+        Returns
+        -------
+
+        2-tuple:
             A two-element tuple containing:
             - A bolometric correction that needs to be added to any magnitude
               to account for the limited bandwidth of the filter
@@ -1145,7 +1310,32 @@ class System:
         fig=None,
         font_size=14,
     ):
+        """
+        Show a summary image of the system with some parameters
+        plotted on top.
+        Will show the light curve of the magnification,
+        and a cartoon of the two objects and their orbit.
+        Will display the physical characteristics on one side
+        and the observational parameters on the other.
 
+        Parameters
+        ----------
+        detection_limit: float
+            The minimal magnification when the event is detected. Default is 0.01.
+        distance_pc:
+            The distance to the system in parsecs. Default is 10 pc.
+        filter_list: list of str
+            A list of filters to show the magnitudes in. Default is ['R', 'V', 'B'].
+        fig: matplotlib.figure.Figure
+            A figure to plot on. If None, will create a new one. Default is None.
+        font_size: int
+            The font size to use. Default is 14.
+
+        Returns
+        -------
+        ax: list of matplotlib.axes.Axes
+            A list of the axes used to plot the figure.
+        """
         if fig is None:
             fig, ax = plt.subplots(1, 2)
         else:
@@ -1322,6 +1512,7 @@ class System:
         return ax
 
     def period_string(self):
+        """Return a string representation of the orbital period including units."""
         P = self.orbital_period
         if P < 0.01:
             return f"{P * 3600:.2g} s"
@@ -1333,6 +1524,7 @@ class System:
         return f"{P:.2g} h"
 
     def print(self, pars=None, surveys=None):
+        """Print a summary of the system parameters."""
 
         par_dict = {
             "inclination": ("i", ""),
@@ -1446,9 +1638,15 @@ def find_lambda_range(temp):
     a black body of this temperature.
     It uses Wein's displacement law to find the peak radiation,
     and gives *10 and /10 of that value.
-    :param temp:
+
+    Parameters
+    ----------
+    temp: float
         temperature of the black body.
-    :return: 2-tuple
+
+    Returns
+    -------
+    2-tuple
         the minimal and maximal wavelength range (in nm).
     """
     wein_b = 2.897e6  # in units of nm/K
@@ -1461,16 +1659,21 @@ def find_lambda_range(temp):
 # to be deprecated:
 def black_body(la, temp, photons=False):  # black body radiation
     """
-    get the amount of radiation expected from a black body
+    Get the amount of radiation expected from a black body
     of the given temperature "temp", at the given wavelengths "la".
-    :param la: float array or scalar
+
+    Parameters
+    ----------
+    la: float array or scalar
         wavelength(s) where the radiation should be calculated.
-    :param temp: float scalar
+    temp: float scalar
         temperature of the black body.
-    :param photons: boolean
+    photons: boolean
         use this to get the BB number of photons,
         instead of total energy.
-    :return:
+
+    Returns
+    -------
         return the radiation (in units of Watts per steradian per m^2 per nm)
         if photons=True, returns photons per second per steradian per m^2 per nm.
     """
@@ -1482,6 +1685,7 @@ def black_body(la, temp, photons=False):  # black body radiation
 
 
 def translate_time_units(units):
+    """Give the number of seconds in a given unit of time."""
     d = {
         "seconds": 1,
         "minutes": 60,
@@ -1495,7 +1699,9 @@ def translate_time_units(units):
 
 
 def get_star_plot_color(temp):
-
+    """
+    Get the color to be used in a plot, for a star based on its temperature.
+    """
     lim1 = 2000
     lim2 = 10000
     push_low = 0.05
@@ -1514,10 +1720,14 @@ def get_star_plot_color(temp):
 def default_filter(filter_name):
     """
     Return the central wavelength and bandpass (in nm) for some well known filters.
-    :param filter_name:
+
+    Parameters
+    ----------
+    filter_name: str
         Name of the filter. Some common defaults are "V", "r", "i", "F500W".
 
-    :return:
+    Returns
+    -------
         A tuple of (wavelength, bandwidth), both in nm
 
     reference: https://en.wikipedia.org/wiki/Photometric_system
@@ -1544,6 +1754,12 @@ def default_filter(filter_name):
 
 
 def guess_compact_type(mass):
+    """
+    Guess the type of compact object based on its mass (in Solar mass units).
+    The least massive objects are white dwarfs,
+    then neutron stars (M<1.2), and finally black holes (M>2.5).
+    """
+
     if mass is None:
         return None
     elif mass <= 1.2:  # was 1.454
@@ -1556,6 +1772,9 @@ def guess_compact_type(mass):
 
 def main_sequence_size(mass):
     """
+    Get an estimate of the size of a star on the main sequence,
+    based on its mass (in Solar mass units).
+
     reference: https://ui.adsabs.harvard.edu/abs/1991Ap%26SS.181..313D/abstract (page 8, empirical data)
     """
     if mass is None:
@@ -1568,6 +1787,12 @@ def main_sequence_size(mass):
 
 def compact_object_size(mass):
     """
+    Get an estimate of the size of a compact object,
+    based on its mass (in Solar mass units).
+    If the mass is below the Chandrasekhar limit, the size is
+    given by the the reference below.
+    Otherwise, we will assume the size of the object is negligible.
+
     reference: https://ui.adsabs.harvard.edu/abs/2002A%26A...394..489B/abstract (Equation 5)
     """
     if mass is None:

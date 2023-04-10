@@ -38,9 +38,11 @@ class Grid:
         Make a very small parameter set,
         just to see that the code works.
 
-        :param wd_lens:
+        Parameters
+        ----------
+        wd_lens: bool
             If True, will scan only white dwarf lenses,
-            including a mass range up to 1.4,
+            including a mass range up to 1.2,
             and multiple temperatures.
             If False, will run only neutron stars and black holes,
             with a single (irrelevant) temperature and larger
@@ -72,9 +74,11 @@ class Grid:
         Make a small parameter set,
         with low resolution on most parameters.
 
-        :param wd_lens:
+        Parameters
+        ----------
+        wd_lens: bool
             If True, will scan only white dwarf lenses,
-            including a mass range up to 1.4,
+            including a mass range up to 1.2,
             and multiple temperatures.
             If False, will run only neutron stars and black holes,
             with a single (irrelevant) temperature and larger
@@ -118,13 +122,14 @@ class Grid:
         ]
 
     def get_num_parameters(self):
+        """Get the number of parameters in the grid."""
         num_pars = len(self.star_masses) * len(self.star_temperatures)
         num_pars *= len(self.lens_masses) * len(self.lens_temperatures)
         num_pars *= len(self.semimajor_axes) * len(self.declinations)
         return num_pars
 
     def memory_size(self):
-
+        """Find the number of GBs needed to store the results."""
         coord_size = self.get_num_parameters()
         num_arrays = 11
         num_small_arrays = 3
@@ -136,10 +141,10 @@ class Grid:
         """
         Apply the probability estimates from
         self.surveys to all the systems in the parameter grid.
-        All the results are saved in  self.systems.
+        All the results are saved in self.systems.
 
-        :param kwargs:
-            Optional parameters are:
+        Optional Parameters
+        -------------------
             ...
 
         """
@@ -288,12 +293,14 @@ class Grid:
 
     def make_xarray(self, coords, data_vars):
         """
-        Setup an xarray holding the simulation results
+        Set up an xarray holding the simulation results.
 
-        :param coords:
-            coordinates dictionary
-        :param data_vars:
-            data variables dictionary
+        Parameters
+        ----------
+        coords: dict
+            Coordinates dictionary
+        data_vars: dict
+            Data variables dictionary
         """
 
         # coords = {
@@ -421,6 +428,14 @@ class Grid:
         self.dataset = ds
 
     def marginalize_declinations(self):
+        """
+        Marginalize over declinations to get the effective volume.
+        This assumes the declinations are uniformly sampled in space,
+        so we can get a weighted average of the effective volume
+        over all contributions from all declinations.
+
+        """
+
         if self.dataset is None:
             raise ValueError("Must have a dataset first!")
         ds = self.dataset
@@ -465,18 +480,21 @@ class Grid:
         are taken as proportional to the
         probability density.
 
-        :param lens_temp: float scalar or array
+        Parameters
+        ----------
+        lens_temp: float scalar or array
             distribution or power law index for the lens temperature axis probabilities.
-        :param star_temp: float scalar or array
+        star_temp: float scalar or array
             distribution or power law index for the star temperature axis probabilities.
-        :param lens_mass: float scalar or array
+        lens_mass: float scalar or array
             distribution or power law index for the lens mass axis probabilities.
-        :param star_mass: float scalar or array
+        star_mass: float scalar or array
             distribution or power law index for the star mass axis probabilities.
-        :param sma: float scalar or array
+        sma: float scalar or array
             distribution or power law index for the semimajor axis probabilities.
 
-        :return:
+        Returns
+        -------
             a DataArray with the same dims as the main result dataset,
             excluding "survey" and "declinations".
             Multiply this by the declination marginalized
@@ -545,7 +563,7 @@ class Grid:
         (https://ui.adsabs.harvard.edu/abs/2018MNRAS.476.2584M/abstract)
         to generate a probability density for white dwarfs.
         Each parameter (temp, mass, sma->semimajor axis)
-        controls of we want to get the "mid" (best estimate
+        controls if we want to get the "mid" (best estimate
         value) or "low" or "high" for the lower or higher
         models.
         """
@@ -592,22 +610,26 @@ class Grid:
         for binary WDs with an initial sma distribution with power law
         index alpha.
 
-        :param alpha: scalar float
+        Parameters
+        ----------
+        alpha: scalar float
             The power law index of the zero age, semimajor axis power law index
             for binary white dwarfs that emerge from the comme envelope phase.
 
-        :param sma: array-like
+        sma: array-like
             The semimajor axis values to evaluate the distribution at.
             If None, use the values in the dataset or the values of the object.
 
-        :param star_masses: array-like
+        star_masses: array-like
             The masses of the stars in solar masses.
             If None, use the dataset masses or the masses on the object.
-        :param lens_masses: array-like
+        lens_masses: array-like
             The masses of the lenses in solar masses.
             If None, use the dataset masses or the masses on the object.
 
-        :return: xarray data array
+        Returns
+        -------
+        xarray data array
             The distribution of the number density (not normalized to anything)
             of the binary white dwarfs, based on their masses and semimajor axis.
         """
@@ -648,6 +670,7 @@ class Grid:
     def gravitational_semi_major_axis(self, lens_mass, star_mass):
         """
         The semi-major axis at which the systems will decay over the age of the galaxy.
+        Input the lens and star mass in solar mass units.
         """
         # G = 6.6743e-11  # m^3 kg^-1 s^-2
         # c = 299792458  # m/s
@@ -663,6 +686,10 @@ class Grid:
         )
 
     def get_total_volume(self):
+        """
+        Calculate the total effective volume of the dataset,
+        weighted by the probability density.
+        """
 
         if "probability_density" not in self.dataset:
             raise KeyError("Need to first calculate a probability model!")
@@ -678,7 +705,9 @@ class Grid:
         given a set of prior probabilities or number of systems
         with the given prameters.
 
-        :param priors: dict or set
+        Parameters
+        ----------
+        priors: dict or set
             For each key in priors, use the given value
             as a function that gets a single value (the
             system parameter named by this key) and outputs
@@ -703,7 +732,8 @@ class Grid:
             e.g., if not given "lens_mass" the result will be
             prob/numbers as a function of lens_mass.
 
-        :return:
+        Returns
+        -------
             Pandas dataframe with all the columns for parameters
             that were not marginalized over, and output columns
             for total_detections and total_volume.
@@ -712,6 +742,9 @@ class Grid:
 
     @staticmethod
     def human_readable_time(time_seconds):
+        """
+        Convert a time in seconds to a human readable string.
+        """
         hours, rem = divmod(time_seconds, 3600)
         minutes, seconds = divmod(rem, 60)
         return f"{int(hours):02d}:{int(minutes):02d}:{seconds:.1f}"

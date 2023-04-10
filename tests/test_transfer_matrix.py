@@ -8,9 +8,13 @@ import copy
 import pytest
 import matplotlib.pyplot as plt
 
-sys.path.append(path.dirname(path.abspath(__file__)))
-
-import transfer_matrix
+from src.transfer_matrix import (
+    TransferMatrix,
+    radial_lightcurve,
+    single_geometry,
+    point_source_approximation,
+    large_source_approximation,
+)
 
 
 def test_convergence():
@@ -19,26 +23,21 @@ def test_convergence():
     p3 = 1e6
     d = np.linspace(1, 2, 5)
     r = 0.005
-    mag1 = transfer_matrix.radial_lightcurve(distances=d, source_radius=r, pixels=p1)
-    mag2 = transfer_matrix.radial_lightcurve(distances=d, source_radius=r, pixels=p2)
-    mag3 = transfer_matrix.radial_lightcurve(
-        distances=d, source_radius=r, pixels=p3, circle_points=p3
-    )
-    mag_ps = transfer_matrix.point_source_approximation(d)
+    mag1 = radial_lightcurve(distances=d, source_radius=r, pixels=p1)
+    mag2 = radial_lightcurve(distances=d, source_radius=r, pixels=p2)
+    mag3 = radial_lightcurve(distances=d, source_radius=r, pixels=p3, circle_points=p3)
+    mag_ps = point_source_approximation(d)
 
     try:
         assert np.all(abs(mag2 - mag3) < 0.01), (
-            f"mag of at least one point between med res and high res "
-            f"({np.max(abs(mag2 - mag3))}) exceeds threshold"
+            f"mag of at least one point between med res and high res " f"({np.max(abs(mag2 - mag3))}) exceeds threshold"
         )
         assert np.all(abs(mag2 - mag3) < 0.01), (
             f"mag of at least one point between high res and point source"
             f"({np.max(abs(mag3 - mag_ps))}) exceeds threshold"
         )
 
-        assert np.any(
-            abs(mag1 - mag3) > 0.01
-        ), "low res mag and high res mag should be quite different."
+        assert np.any(abs(mag1 - mag3) > 0.01), "low res mag and high res mag should be quite different."
 
     except:
         plt.plot(d, mag1, "-x", label=f"pixels= {p1}")
@@ -61,15 +60,11 @@ def test_matrix_vs_direct_calculation(matrix):
 
     # get a reference radial curve from direct calculation:
     for i, sr in enumerate(source_radii):
-        mu1[i, :] = transfer_matrix.radial_lightcurve(
-            distances=d, source_radius=sr, occulter_radius=0
-        )
+        mu1[i, :] = radial_lightcurve(distances=d, source_radius=sr, occulter_radius=0)
 
     # get the same curves from the transfer matrix
     for i, sr in enumerate(source_radii):
-        mu2[i, :] = matrix.radial_lightcurve(
-            source=sr, distances=d, occulter_radius=0, get_offsets=False
-        )
+        mu2[i, :] = matrix.radial_lightcurve(source=sr, distances=d, occulter_radius=0, get_offsets=False)
 
     if not np.all(abs(mu1 - mu2) / mu1 < 0.01):  # maintain precision to within 1%
         plt.legend()
@@ -86,23 +81,17 @@ def test_matrix_vs_direct_calculation(matrix):
         plt.legend()
         plt.show(block=True)
 
-        raise ValueError(
-            f"At least one point shows a different magnification of {np.max(abs(mu1-mu2) / mu1)}"
-        )
+        raise ValueError(f"At least one point shows a different magnification of {np.max(abs(mu1-mu2) / mu1)}")
 
     # now do the same test with non-zero occulter radius
     occulter = 0.8
     # get a reference radial curve from direct calculation:
     for i, sr in enumerate(source_radii):
-        mu1[i, :] = transfer_matrix.radial_lightcurve(
-            distances=d, source_radius=sr, occulter_radius=occulter
-        )
+        mu1[i, :] = radial_lightcurve(distances=d, source_radius=sr, occulter_radius=occulter)
 
     # get the same curves from the transfer matrix
     for i, sr in enumerate(source_radii):
-        mu2[i, :] = matrix.radial_lightcurve(
-            source=sr, distances=d, occulter_radius=occulter, get_offsets=False
-        )
+        mu2[i, :] = matrix.radial_lightcurve(source=sr, distances=d, occulter_radius=occulter, get_offsets=False)
 
     if not np.all(abs(mu1 - mu2) / mu1 < 0.01):  # maintain precision to within 1%
         plt.legend()
@@ -119,17 +108,13 @@ def test_matrix_vs_direct_calculation(matrix):
         plt.legend()
         plt.show(block=True)
 
-        raise ValueError(
-            f"At least one point shows a different magnification of {np.max(abs(mu1-mu2) / mu1)}"
-        )
+        raise ValueError(f"At least one point shows a different magnification of {np.max(abs(mu1-mu2) / mu1)}")
 
 
 def test_matrix_interpolation(matrix):
 
     source_radii = np.copy(matrix.source_radii[[7, 14]])
-    source_radii += (
-        np.random.random(source_radii.shape) * matrix.step_source
-    )  # offset a little bit
+    source_radii += np.random.random(source_radii.shape) * matrix.step_source  # offset a little bit
 
     d = np.copy(matrix.distances[0:30])
     d += np.random.random(d.shape) * matrix.step_dist  # offset a little bit
@@ -138,15 +123,11 @@ def test_matrix_interpolation(matrix):
 
     # get a reference radial curve from direct calculation:
     for i, sr in enumerate(source_radii):
-        mu1[i, :] = transfer_matrix.radial_lightcurve(
-            distances=d, source_radius=sr, occulter_radius=0
-        )
+        mu1[i, :] = radial_lightcurve(distances=d, source_radius=sr, occulter_radius=0)
 
     # get the same curves from the transfer matrix
     for i, sr in enumerate(source_radii):
-        mu2[i, :] = matrix.radial_lightcurve(
-            source=sr, distances=d, occulter_radius=0, get_offsets=False
-        )
+        mu2[i, :] = matrix.radial_lightcurve(source=sr, distances=d, occulter_radius=0, get_offsets=False)
 
     if not np.all(abs(mu1 - mu2) / mu1 < 0.05):  # maintain precision to within 5%
         plt.cla()
@@ -164,9 +145,7 @@ def test_matrix_interpolation(matrix):
         plt.legend()
         plt.show(block=True)
 
-        raise ValueError(
-            f"At least one point shows a different magnification of {np.max(abs(mu1 - mu2) / mu1)}"
-        )
+        raise ValueError(f"At least one point shows a different magnification of {np.max(abs(mu1 - mu2) / mu1)}")
 
 
 def test_analytic_solution():
@@ -181,7 +160,7 @@ def test_analytic_solution():
     expected_magnification = np.sqrt(1 + 4 / source**2)
 
     # using our code:
-    calculated_magnification = transfer_matrix.single_geometry(
+    calculated_magnification = single_geometry(
         distance=0,
         source_radius=source,
         occulter_radius=occulter,
@@ -192,10 +171,7 @@ def test_analytic_solution():
         f"Magnification: analytical= {expected_magnification}, calculated= {calculated_magnification}"
     )
 
-    assert (
-        abs(calculated_magnification - expected_magnification) / expected_magnification
-        < 0.01
-    )  # 1% accuracy
+    assert abs(calculated_magnification - expected_magnification) / expected_magnification < 0.01  # 1% accuracy
 
     # assume source is smaller than lens by 2.5:
     source = 0.4
@@ -205,7 +181,7 @@ def test_analytic_solution():
     expected_magnification = np.sqrt(1 + 4 / source**2)
 
     # using our code:
-    calculated_magnification = transfer_matrix.single_geometry(
+    calculated_magnification = single_geometry(
         distance=0,
         source_radius=source,
         occulter_radius=occulter,
@@ -216,10 +192,7 @@ def test_analytic_solution():
         f"Magnification: analytical= {expected_magnification}, calculated= {calculated_magnification}"
     )
 
-    assert (
-        abs(calculated_magnification - expected_magnification) / expected_magnification
-        < 0.01
-    )  # 1% accuracy
+    assert abs(calculated_magnification - expected_magnification) / expected_magnification < 0.01  # 1% accuracy
 
     # now lets do the case where there is a non-zero sized occulter (case II):
     source = 3
@@ -235,7 +208,7 @@ def test_analytic_solution():
     )
 
     # using our code:
-    calculated_magnification = transfer_matrix.single_geometry(
+    calculated_magnification = single_geometry(
         distance=0,
         source_radius=source,
         occulter_radius=occulter,
@@ -246,10 +219,7 @@ def test_analytic_solution():
         f"Magnification: analytical= {expected_magnification} | calculated= {calculated_magnification}"
     )
 
-    assert (
-        abs(calculated_magnification - expected_magnification) / expected_magnification
-        < 0.01
-    )  # 1% accuracy
+    assert abs(calculated_magnification - expected_magnification) / expected_magnification < 0.01  # 1% accuracy
 
     # now lets do the case where the occulter is larger than the lens (case III):
     source = 3
@@ -265,7 +235,7 @@ def test_analytic_solution():
     )
 
     # using our code:
-    calculated_magnification = transfer_matrix.single_geometry(
+    calculated_magnification = single_geometry(
         distance=0,
         source_radius=source,
         occulter_radius=occulter,
@@ -276,22 +246,15 @@ def test_analytic_solution():
         f"Magnification: analytical= {expected_magnification} | calculated= {calculated_magnification}"
     )
 
-    assert (
-        abs(calculated_magnification - expected_magnification) / expected_magnification
-        < 0.01
-    )  # 1% accuracy
+    assert abs(calculated_magnification - expected_magnification) / expected_magnification < 0.01  # 1% accuracy
 
 
 def test_numerical_calculation():
     # ref: https://ui.adsabs.harvard.edu/abs/2002A%26A...394..489B/abstract
     # looking at equation 4 for a point source we should get:
     distance = 0.5
-    magnification_point_source = 0.5 * (
-        np.sqrt(1 + 4 / distance**2) + 1 / np.sqrt(1 + 4 / distance**2)
-    )
-    mag = transfer_matrix.single_geometry(
-        distance=distance, source_radius=0.005, pixels=1e6
-    )
+    magnification_point_source = 0.5 * (np.sqrt(1 + 4 / distance**2) + 1 / np.sqrt(1 + 4 / distance**2))
+    mag = single_geometry(distance=distance, source_radius=0.005, pixels=1e6)
 
     assert abs(mag - magnification_point_source) < 0.01  # 1% precision
 
@@ -300,7 +263,7 @@ def test_numerical_calculation():
     source = 0.8
     beta = 1 / source
     magnification_disk_touching = 2 / np.pi * np.sqrt(1 + 4 * beta**2)
-    mag = transfer_matrix.single_geometry(distance=distance, source_radius=source)
+    mag = single_geometry(distance=distance, source_radius=source)
 
     assert abs(mag - magnification_disk_touching) < 0.25  # close enough
 
@@ -311,10 +274,8 @@ def test_elliptical_large_source(matrix_large):
     source_radius = 10.0
     occulter_radius = 0.0
     d = np.linspace(0, source_radius * 1.5, 18)
-    mag_approx = transfer_matrix.large_source_approximation(
-        d, source_radius, occulter_radius
-    )
-    mag_direct = transfer_matrix.radial_lightcurve(d, source_radius, occulter_radius)
+    mag_approx = large_source_approximation(d, source_radius, occulter_radius)
+    mag_direct = radial_lightcurve(d, source_radius, occulter_radius)
 
     if not np.all(np.abs(mag_direct - mag_approx) < 0.01):
         plt.cla()
@@ -329,10 +290,8 @@ def test_elliptical_large_source(matrix_large):
 
     # add an occulter
     occulter_radius = 2.0
-    mag_approx = transfer_matrix.large_source_approximation(
-        d, source_radius, occulter_radius
-    )
-    mag_direct = transfer_matrix.radial_lightcurve(d, source_radius, occulter_radius)
+    mag_approx = large_source_approximation(d, source_radius, occulter_radius)
+    mag_direct = radial_lightcurve(d, source_radius, occulter_radius)
 
     if not np.all(np.abs(mag_direct - mag_approx) < 0.01):
         plt.cla()
@@ -349,15 +308,11 @@ def test_elliptical_large_source(matrix_large):
     source_radius = 2.0
     occulter_radius = 0.0
     d = np.linspace(0, source_radius * 1.5, 18)
-    mag_approx = transfer_matrix.large_source_approximation(
-        d, source_radius, occulter_radius
-    )
+    mag_approx = large_source_approximation(d, source_radius, occulter_radius)
     mag_direct = matrix_large.radial_lightcurve(source_radius, d, occulter_radius)
 
     # still ballpark but not very accurate for small sources
-    if not np.all(np.abs(mag_direct - mag_approx) < 0.3) or not np.all(
-        np.abs(mag_direct - mag_approx) > 0.01
-    ):
+    if not np.all(np.abs(mag_direct - mag_approx) < 0.3) or not np.all(np.abs(mag_direct - mag_approx) > 0.01):
         plt.cla()
         plt.plot(d, mag_approx, "-o", label="approx")
         plt.plot(d, mag_direct, "-x", label="direct")
@@ -375,7 +330,7 @@ def test_elliptical_large_source(matrix_large):
 
 def test_addition(counting_matrix, counting_matrix_dist1, counting_matrix_dist2):
     # check the null combination of matrix with new (empty) matrix
-    new_matrix = counting_matrix + transfer_matrix.TransferMatrix()
+    new_matrix = counting_matrix + TransferMatrix()
 
     assert new_matrix.min_dist == counting_matrix.min_dist
     assert new_matrix.max_dist == counting_matrix.max_dist
@@ -388,7 +343,7 @@ def test_addition(counting_matrix, counting_matrix_dist1, counting_matrix_dist2)
     assert np.array_equal(new_matrix.flux[0, 0, :], np.array([0, 1, 2, 3, 4, 5]))
 
     # check the same works for other order of addition
-    new_matrix = transfer_matrix.TransferMatrix() + counting_matrix
+    new_matrix = TransferMatrix() + counting_matrix
 
     assert new_matrix.min_dist == counting_matrix.min_dist
     assert new_matrix.max_dist == counting_matrix.max_dist
@@ -418,9 +373,7 @@ def test_addition(counting_matrix, counting_matrix_dist1, counting_matrix_dist2)
         np.append(counting_matrix.distances[:-1], counting_matrix_dist1.distances),
     )
 
-    assert np.array_equal(
-        new_matrix.flux[0, 0, :], np.array([0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5])
-    )
+    assert np.array_equal(new_matrix.flux[0, 0, :], np.array([0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5]))
 
     new_matrix = counting_matrix + counting_matrix_dist2
 
@@ -439,9 +392,7 @@ def test_addition(counting_matrix, counting_matrix_dist1, counting_matrix_dist2)
 
     # check that inconsistent parameters (except distances) cannot be added
     counting_matrix.occulter_radii[-1] += 0.1
-    with pytest.raises(
-        ValueError, match='Values for "occulter_radii" are inconsistent!'
-    ):
+    with pytest.raises(ValueError, match='Values for "occulter_radii" are inconsistent!'):
         counting_matrix + counting_matrix_dist2
 
 
@@ -465,15 +416,11 @@ def test_matrix_dwindled(matrix):
 
     # these source radii were directly calculated in the matrix
     for i, sr in enumerate(source_radii):
-        mu1[i, :] = matrix.radial_lightcurve(
-            source=sr, distances=d, occulter_radius=0, get_offsets=False
-        )
+        mu1[i, :] = matrix.radial_lightcurve(source=sr, distances=d, occulter_radius=0, get_offsets=False)
 
     # these need to be interpolated in the "dwindled" matrix
     for i, sr in enumerate(source_radii):
-        mu2[i, :] = matrix2.radial_lightcurve(
-            source=sr, distances=d, occulter_radius=0, get_offsets=False
-        )
+        mu2[i, :] = matrix2.radial_lightcurve(source=sr, distances=d, occulter_radius=0, get_offsets=False)
 
     if not np.all(abs(mu1 - mu2) < 0.1):  # maintain precision to within 10%
         plt.legend()
@@ -483,6 +430,4 @@ def test_matrix_dwindled(matrix):
             plt.plot(d, mu1[i, :], "-x", label=f"source radius= {sr} (direct)")
         plt.show(block=True)
 
-        raise ValueError(
-            f"At least one point shows a different magnification of {np.max(abs(mu1-mu2))}"
-        )
+        raise ValueError(f"At least one point shows a different magnification of {np.max(abs(mu1-mu2))}")
