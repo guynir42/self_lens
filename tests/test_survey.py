@@ -99,14 +99,14 @@ def test_individual_systems(sim, ztf):
 
     sim.calculate()
     s1 = sim.syst
-    print(f"period= {s1.orbital_period * 3600:.1f}s | fwhm= {sim.fwhm:.1f}s | source_size= {s1.source_size:.3f} ")
+    # print(f"period= {s1.orbital_period * 3600:.1f}s | fwhm= {sim.fwhm:.1f}s | source_size= {s1.source_size:.3f} ")
 
     ztf.apply_detection_statistics(s1)
 
-    print(
-        f'peak magnification= {np.max(s1.magnifications):.2f} | flare_prob= {s1.flare_prob["ZTF"][0]:.2e} '
-        f'| visit_prob= {s1.visit_prob["ZTF"][0]:.2e} | visit_detections= {s1.visit_detections["ZTF"][0]:.2e}'
-    )
+    # print(
+    #     f'peak magnification= {np.max(s1.magnifications):.2f} | flare_prob= {s1.flare_prob["ZTF"][0]:.2e} '
+    #     f'| visit_prob= {s1.visit_prob["ZTF"][0]:.2e} | visit_detections= {s1.visit_detections["ZTF"][0]:.2e}'
+    # )
 
     # probability to hit the flare during a single visit
     timing_prob = sim.fwhm / (s1.orbital_period * 3600)
@@ -117,19 +117,21 @@ def test_individual_systems(sim, ztf):
     diluted_flare_magnification = sim.fwhm / ztf.exposure_time * (np.max(s1.magnifications) - 1) + 1
     flare_snr = diluted_flare_magnification / ztf.prec_list[0]
     flare_prob = 0.5 * (1 + scipy.special.erf(flare_snr - ztf.threshold))
-    print(f'flare_prob= {flare_prob:.2e} | full calculation= {s1.flare_prob["ZTF"][0]:.2e}')
+    # print(f'flare_prob= {flare_prob:.2e} | full calculation= {s1.flare_prob["ZTF"][0]:.2e}')
     assert abs(flare_prob - s1.flare_prob["ZTF"]) < 0.1
 
     # with more exposures in a series we get a much better chance to detect any flares
-    ztf.series_length = 20
+    ztf.series_length = 50
+    # ztf.dead_time = 0.1  # make a fast photometry series
     sim.calculate()  # this will regenerate the same system but in a new object
     s2 = sim.syst
-    ztf.apply_detection_statistics(s2)
+    ztf.apply_detection_statistics(s2, plotting=0)
 
-    print(
-        f'peak magnification= {np.max(s2.magnifications):.2f} | flare_prob= {s2.flare_prob["ZTF"][0]:.2e} '
-        f'| visit_prob= {s2.visit_prob["ZTF"][0]:.2e} | visit_detections= {s2.visit_detections["ZTF"][0]:.2e}'
-    )
+    # print(
+    #     f'period= {s2.orbital_period * 3600:.1f}s | fwhm= {sim.fwhm:.1f}s | source_size= {s2.source_size:.3f}'
+    #     f'| peak magnification= {np.max(s2.magnifications):.2f} | flare_prob= {s2.flare_prob["ZTF"][0]:.2e} '
+    #     f'| visit_prob= {s2.visit_prob["ZTF"][0]:.2e} | visit_detections= {s2.visit_detections["ZTF"][0]:.2e}'
+    # )
 
     assert 1 - s2.visit_prob["ZTF"] < 0.1
     assert s2.visit_detections["ZTF"] > 1

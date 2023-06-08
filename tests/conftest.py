@@ -22,7 +22,7 @@ ROOT_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def grid():
     g = Grid()
     g.setup_demo_scan(wd_lens=True)
-    g.surveys = [Survey("TESS")]  # debugging only!
+    # g.surveys = [Survey("TESS")]  # debugging only!
     # g.semimajor_axes = np.arange(0.001, 0.3, 0.05)
     # g.semimajor_axes = g.semimajor_axes[39:47]
     # g.declinations = [0.0005]
