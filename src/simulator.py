@@ -1099,12 +1099,7 @@ class System:
         flux1 *= (self.star_size * sun_radius) ** 2 / (10 * pc) ** 2  # erg/s/cm^2
 
         if self.lens_flux > 0 and self.lens_temp > 0:
-            flux2 = integ.quad(
-                self.black_body,
-                filter_low_f,
-                filter_high_f,
-                args=(self.lens_temp, True),
-            )[0]
+            flux2 = integ.quad(self.black_body, filter_low_f, filter_high_f, args=(self.lens_temp, True))[0]
             flux2 *= (self.lens_size * sun_radius) ** 2 / (10 * pc) ** 2  # erg/s/cm^2
         else:
             flux2 = 0

@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 from src.simulator import Simulator, default_filter, translate_time_units
 
-MIN_DIST_PC = 10
+MIN_DIST_PC = 3
 
 
 class Survey:
@@ -175,7 +175,7 @@ class Survey:
         plotting: bool
             If True, make a plot of the magnification and S/N light curve. Default is False.
         """
-
+        # print(f'a= {system.semimajor_axis}, d= {system.declination}')
         # these are the null values for a system that cannot be detected at all (i.e., an early return statement)
         system.distances[self.name] = np.array([])  # distances (in pc) at which this system is detectable
         system.volumes[self.name] = np.array([])  # single visit space volume for those distances * field of view (pc^3)
@@ -282,7 +282,6 @@ class Survey:
 
         period = system.orbital_period * 3600  # convert to seconds
         if len(prec):  # only calculate probabilities for distances that have any chance of detection
-
             (peak_prob, mean_prob, num_detections) = self.calc_prob(
                 lc, ts, prec, best_precision, best_flare_time, period, plotting
             )
@@ -307,53 +306,54 @@ class Survey:
                 system.total_volumes[self.name] * system.total_detections[self.name]
             )
 
-        # consider what happens if the survey does exist in the list, should it be updated??
+        # TODO: consider what happens if the survey does exist in the list, should it be updated??
         if self.name not in (s.name for s in system.surveys):
             system.surveys.append(self)
 
     def calc_prob(self, lc, ts, precision, best_precision, best_t_flare, period, plotting=False):
         """
-         For a given lightcurve calculate the S/N and time coverage.
-         In some cases the S/N is just one number, while in other cases
-         it is an array with values for each time offset between the
-         exposure and the flare time.
-         The S/N is converted to probability, either the peak_prob,
-         which is the probability to find a peak assuming perfect timing
-         of exposure on top of the flare, and the mean_prob which is
-         the average probability to find a flare assuming a uniform
-         distribution of timing offsets over the entire orbit.
+        For a given lightcurve calculate the S/N and time coverage.
+        In some cases the S/N is just one number, while in other cases
+        it is an array with values for each time offset between the
+        exposure and the flare time.
+        The S/N is converted to probability, either the peak_prob,
+        which is the probability to find a peak assuming perfect timing
+        of exposure on top of the flare, and the mean_prob which is
+        the average probability to find a flare assuming a uniform
+        distribution of timing offsets over the entire orbit.
 
-         Parameters
-         ----------
-         lc: float array
-             lightcurve array of the flare.
-         ts: float array
-             timestamps array (must be the same size as "lc", must be uniformly sampled).
-         precision: float array
-             precision array, for each distance the system can be.
-         best_precision: float scalar
-             the best precision of the survey, to find the S/N and rescale to all other values of precision.
-         best_t_flare: float scalar
-             the maximal flare duration, measured at the best precision, to set the scale for S/N calculations.
-         period: float scalar
-             the orbital period of the flares, in seconds
-
-         Returns
-         -------
+        Parameters
+        ----------
+        lc: float array
+            lightcurve array of the flare.
+        ts: float array
+            timestamps array (must be the same size as "lc", must be uniformly sampled).
+        precision: float array
+            precision array, for each distance the system can be.
+        best_precision: float scalar
+            the best precision of the survey, to find the S/N and rescale to all other values of precision.
+        best_t_flare: float scalar
+            the maximal flare duration, measured at the best precision, to set the scale for S/N calculations.
+        period: float scalar
+            the orbital period of the flares, in seconds
+        plotting: bool
+            whether to plot the S/N as a function of time offset.
+        Returns
+        -------
         peak_prob: the probability to find the flare if the timing is ideal
-                    (i.e., the exposure is right on the peak).
+                   (i.e., the exposure is right on the peak).
         mean_prob: the probability to find a flare, averaged over all possible
-                    timing offsets in the orbital period (uniform phase).
-                    If the series length is longer than one orbit, then the
-                    probability is for getting at least one detection.
+                   timing offsets in the orbital period (uniform phase).
+                   If the series length is longer than one orbit, then the
+                   probability is for getting at least one detection.
         num_detections: average number of detections per visit.
-                        For a single exposure, this is just equal to mean_prob.
-                        For multiple exposures, if the series is larger than
-                        the orbital period, the number of detections is set
-                        by the average number of flares in a series,
-                        multiplied by the peak probability
-                        (so it assumes the peak probability is the same
-                        for each flare in the series).
+                       For a single exposure, this is just equal to mean_prob.
+                       For multiple exposures, if the series is larger than
+                       the orbital period, the number of detections is set
+                       by the average number of flares in a series,
+                       multiplied by the peak probability
+                       (so it assumes the peak probability is the same
+                       for each flare in the series).
 
         """
         t_exp = self.exposure_time
@@ -364,7 +364,6 @@ class Survey:
         # choose the detection method depending on the flare time and exposure time
         # the snr represents the probability to detect a single flare (ignoring periodicity),
         # assuming the flare occured inside the time span of the series
-
         multiplicative_factor = 1  # the S/N values are the only valid probability points
         if best_t_flare * 10 < t_exp:  # flare is much shorter than exposure time
             signal = np.sum(lc[1:] * np.diff(ts))  # total signal in flare (skip 1st bin of LC to multiply with diff)
@@ -372,19 +371,24 @@ class Survey:
             snr = signal / noise
             snr = np.array([snr])  # put this into a 1D array
 
-            # coverage = t_exp  # the only times where prob>0 is inside the exposure
             dt = t_series * t_exp / (t_exp + t_dead)  # some parts of t_series are dead times
-        elif t_exp * 10 < best_t_flare < t_series / 10:  # exposures are short and numerous: can use matched-filter
-            # TODO: add dead time
-            snr = np.sqrt(np.sum(lc**2)) / best_precision  # sum over different exposures hitting places on the LC
-            snr = np.array([snr])  # put this into a 1D array
-            dt = t_series  # anywhere along the series has the same S/N and prob (ignoring edge effects)
+            # print(f'dt= {dt}, flare shorter than exposure time ')
 
+        # elif t_exp * 30 < best_t_flare < t_series / 10:  # exposures are short and numerous: can use matched-filter
+        #     # TODO: add dead time
+        #     snr = np.sqrt(np.sum(lc**2)) / best_precision  # sum over different exposures hitting places on the LC
+        #     snr = np.array([snr])  # put this into a 1D array
+        #     dt = t_series  # anywhere along the series has the same S/N and prob (ignoring edge effects)
+        #     # print(f'dt= {dt} short and numerous exposures')
         else:  # all other cases require sliding window
             dt = ts[1] - ts[0]  # assume timestamps are uniformly sampled in the simulated LC
-            N_exp = max(1, int(np.round(t_exp / dt)))  # number of time steps in single exposure
-            single_exposure_snr = np.convolve(lc, np.ones(N_exp), mode="same") / N_exp / best_precision
-            # coverage = dt * len(single_exposure_snr)  # all points with non-zero S/N have prob>0
+            num_exp = max(1, int(np.round(t_exp / dt)))  # number of time steps in single exposure
+
+            # convolution is used for integrating over the exposure window
+            # divide the num_exp to get the average the flux in that window
+            # the best_precision is used to convert flux to S/N (for the best precision)
+            # the result is the S/N for one exposure at each time step
+            single_exposure_snr = np.convolve(lc, np.ones(num_exp), mode="same") / num_exp / best_precision
 
             if self.series_length == 1:
                 snr = single_exposure_snr
@@ -392,24 +396,24 @@ class Survey:
                 # Need to calculate the matched-filter result for several exposures.
                 # go over the single-image response and convolve that
                 # with the addition of multiple values from separate exposures
-                N_btw = int(np.round((t_exp + t_dead) / dt))  # number of steps between repeat exposures
-                N_btw = max(N_btw, 1)
-                N_flare = int(np.round(best_t_flare / dt))
-                N_flare = max(N_flare, 1)
-                N_filter = min(N_flare * 5, int(N_btw * self.series_length))  # number of steps in filter
-                N_filter = max(N_filter, 1)
-                # if we only sample probabilities from a subset of the series
-                # then we must increase the total prob*dt later
-                multiplicative_factor = int(N_btw * self.series_length) / N_filter
+                num_btw = max(int(np.round((t_exp + t_dead) / dt)), 1)  # number of steps between repeat exposures
+                num_flare = max(int(np.ceil(best_t_flare / dt)), 1)  # number of steps in flare
+                num_filter = min(num_flare * 100, int(num_btw * self.series_length))  # number of steps in filter
 
-                # the filter samples the mid exposure with the correct dead time
-                matched_filter = np.zeros(N_filter)
-                matched_filter[N_exp // 2 :: N_btw] = 1
-                snr = np.sqrt(np.convolve(single_exposure_snr**2, matched_filter, mode="same"))
+                # if we only sample probabilities from a part of the series
+                # then we must increase the total prob*dt later since the flare
+                # can hit at any point in the series and we calculated prob for only a small part
+                multiplicative_factor = num_btw * self.series_length / num_filter
+                # print(
+                #     f'dt= {dt}, '
+                #     f'btw: {num_btw}, flare: {num_flare}, filter: {num_filter}, '
+                #     f'mul: {multiplicative_factor}'
+                # )
 
-                # coverage = t_series / (dt * N_filter)
-
-            # coverage = min(coverage, period)  # coverage cannot exceed period (when series is longer, see below)
+                # the filter samples the mid-exposure with the correct dead time
+                matched_filter = np.zeros(num_filter)
+                matched_filter[num_exp // 2 :: num_btw] = 1
+                snr = np.sqrt(scipy.signal.fftconvolve(single_exposure_snr**2, matched_filter, mode="same"))
 
         if plotting:
             print(f"Flare duration= {best_t_flare:.2f}s | dt= {dt:.2f}s")
@@ -445,6 +449,7 @@ class Survey:
         # each of the dt ranges
         mean_prob = np.sum(prob, axis=1) * dt / period * multiplicative_factor
         mean_prob = np.minimum(mean_prob, 1.0)  # cannot exceed 1, although this should never happen
+        # print(f"mean prob= {mean_prob[0]}")
         # there's no way to see more than one flare in this series,
         # so the average number of detections is just the probability to see one
         num_detections = mean_prob
@@ -499,7 +504,7 @@ class Survey:
         for i, d in enumerate(dec):
             sim.calculate(declination=d)
             self.apply_detection_statistics(sim.syst)
-            if sim.syst.visit_prob[self.name]:
+            if sim.syst.visit_prob[self.name].size > 0:
                 prob[i] = sim.syst.visit_prob[self.name]
             else:
                 break
@@ -583,6 +588,8 @@ def setup_default_survey(name, kwargs):
     specific survey, using the default list of surveys we define below.
     """
 
+    ###### ZTF #######
+
     # get these from package "ztf_wd", module "collect_summaries.py" with function "ztf_rms"
     ztf_mag = np.arange(12.5, 21.5, 0.5)
     ztf_rms = (
@@ -641,11 +648,15 @@ def setup_default_survey(name, kwargs):
         / 7.5
     )
 
+    ##### TESS #####
+
     # this comes from the TESS references, but it seems really too optimistic
     tess_mag_rough = np.array(list(range(6, 11)) + [15])
     tess_rms_rough = np.array([26, 30, 35, 50, 100, 450]) * 1e-6 * 3.6
     tess_mag = np.arange(6, 15, 0.5)
     tess_rms = np.interp(tess_mag, tess_mag_rough, tess_rms_rough)
+
+    ##### CURIOS #####
 
     # from Hanna's email:
     # The table below contains values of the expected SNR for different source magnitudes and integration
@@ -669,10 +680,12 @@ def setup_default_survey(name, kwargs):
         (20.5, 0.080, 0.343, 0.691, 1.549, 2.684),
         (21.0, 0.050, 0.218, 0.439, 0.983, 1.703),
     ]
-    curios_chosen_exp_time = 15
+    curios_chosen_exp_time = 15  # debug only. True value should be 30
     idx = curios_exp_times.index(curios_chosen_exp_time) + 1  # plus one to account for the magnitude first element
     curios_precision = [1 / m[idx] for m in curios_mag_snr if m[idx] > 3.0]
     curios_mags = [m[0] for m in curios_mag_snr if m[idx] > 3.0]
+
+    #### LAST ####
 
     last_mag_rms = [
         (10.0, 0.005),
@@ -693,6 +706,8 @@ def setup_default_survey(name, kwargs):
         (17.5, 0.214),
         (18.0, 0.300),
     ]
+
+    #### LSST ####
 
     lsst_mag = np.arange(10, 25, 1.0)
     lsst_rms = np.ones(len(lsst_mag)) * 0.01
@@ -757,7 +772,7 @@ def setup_default_survey(name, kwargs):
         "TESS": {
             "name": "TESS",
             "telescope": "TESS",
-            "field_area": 2300,
+            "field_area": 3200,
             "exposure_time": 30 * 60,
             "cadence": 2 * 365.25,  # visit per two year
             "series_length": 27 * 24 * 60 / 30,  # 27 days, in 30min exposures
@@ -771,16 +786,16 @@ def setup_default_survey(name, kwargs):
             "mag_list": tess_mag,
             "footprint": 1,  # entire sky
             "duration": 5,
-            "distances": np.geomspace(MIN_DIST_PC, 300, 100, endpoint=True)[1:],
+            "distances": np.geomspace(MIN_DIST_PC, 300, 200, endpoint=True)[1:],
         },
         "CURIOS": {
             "name": "CuRIOS",
             # 'field_area': 5 ** 2 * np.pi,  # 10 deg f.o.v diameter
-            "field_area": 49,  # 7 degree square
+            "field_area": 32,  # 6.9 times 4.6 degree field
             "exposure_time": curios_chosen_exp_time,
             "filter": "r",
             # 'series_length': None,  # find this value automatically
-            "series_length": 60,  # 15 minute visits, with 15 second exposures
+            "series_length": 30,  # 15 minute visits, with 30 second exposures
             "mag_list": curios_mags,
             "prec_list": curios_precision,
             "slew_time": 5,
@@ -795,13 +810,13 @@ def setup_default_survey(name, kwargs):
         },
         "CURIOS ARRAY": {
             "name": "CuRIOS array",
-            "field_area": 4 * 180**2 / np.pi,  # entire sky
+            "field_area": 32 * 300,  # field of view times 300 satellites
             "exposure_time": curios_chosen_exp_time,
             "filter": "r",
             "mag_list": curios_mags,
             "prec_list": curios_precision,
             # 'series_length': None,  # find this value automatically
-            "series_length": 60,  # 15 minute visits, with 15 second exposures
+            "series_length": 30,  # 15 minute visits, with 30 second exposures
             # 'footprint': 1.0,
             "cadence": 15 / 24 / 60,  # start a new series every 15 minutes
             "slew_time": 5,
@@ -873,27 +888,27 @@ if __name__ == "__main__":
     # tess.apply_detection_statistics(sim.syst)
     # print(f'effective volume (P={sim.syst.period_string()})= {sim.syst.effective_volumes["TESS"]:.2e}')
 
-    print()
-    ztf = Survey("ztf")
-    ztf.print()
-    ztf.apply_detection_statistics(sim.syst)
-    # sim.syst.print(surveys=['ZTF'])
-
-    print()
-    lsst = Survey("LSST")
-    lsst.print()
-    lsst.apply_detection_statistics(sim.syst)
-
-    print()
-    cu = Survey("curios")
-    cu.print()
-    cu.apply_detection_statistics(sim.syst)
-    # sim.syst.print(surveys=['CURIOS'])
-
-    print()
-    array = Survey("curios array")
-    array.print()
-    cu.apply_detection_statistics(sim.syst)
+    # print()
+    # ztf = Survey("ztf")
+    # ztf.print()
+    # ztf.apply_detection_statistics(sim.syst)
+    # # sim.syst.print(surveys=['ZTF'])
+    #
+    # print()
+    # lsst = Survey("LSST")
+    # lsst.print()
+    # lsst.apply_detection_statistics(sim.syst)
+    #
+    # print()
+    # cu = Survey("curios")
+    # cu.print()
+    # cu.apply_detection_statistics(sim.syst)
+    # # sim.syst.print(surveys=['CURIOS'])
+    #
+    # print()
+    # array = Survey("curios array")
+    # array.print()
+    # cu.apply_detection_statistics(sim.syst)
 
     # print()
     # last = Survey('last')

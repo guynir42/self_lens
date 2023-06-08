@@ -1,6 +1,7 @@
 import sys
 import os
 import pytest
+import time
 
 import pickle
 import numpy as np
@@ -21,6 +22,10 @@ ROOT_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def grid():
     g = Grid()
     g.setup_demo_scan(wd_lens=True)
+    g.surveys = [Survey("TESS")]  # debugging only!
+    # g.semimajor_axes = np.arange(0.001, 0.3, 0.05)
+    # g.semimajor_axes = g.semimajor_axes[39:47]
+    # g.declinations = [0.0005]
     always_recalculate = True
     filename = os.path.join(ROOT_FOLDER, "tests/test_data/test_dataset.nc")
     if always_recalculate or not os.path.isfile(filename):
@@ -84,8 +89,13 @@ def counting_matrix_factory():
             T.flux[np.unravel_index(i, T.flux.shape)] = float(i)
             T.input_flux[np.unravel_index(i, T.flux.shape)] = float(i)
             T.moment[np.unravel_index(i, T.moment.shape)] = float(i)
-
-        T.magnification = T.flux / T.input_flux
+        zero_flux = T.input_flux == 0
+        input_flux_nans = T.input_flux
+        input_flux_nans[zero_flux] = np.nan
+        if np.any(T.flux[zero_flux] != 0):
+            raise ValueError("There are non-zero fluxes where the input flux is zero!")
+        T.magnification = T.flux / input_flux_nans
+        T.magnification[zero_flux] = 0
 
         T.update_notes()
         T.complete = True

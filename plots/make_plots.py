@@ -28,9 +28,7 @@ fig = plt.figure(num=0, figsize=[12, 6])
 
 distances = np.linspace(0, 5, 20)
 for i, d in enumerate(distances):
-    transfer_matrix.single_geometry(
-        distance=d, source_radius=0.8, occulter_radius=0.25, plotting=True, legend=True
-    )
+    transfer_matrix.single_geometry(distance=d, source_radius=0.8, occulter_radius=0.25, plotting=True, legend=True)
     plt.show()
     plt.pause(0.2)
 
@@ -77,11 +75,7 @@ distances = np.linspace(0, 2.0, 20)
 sources = [0.25, 0.5, 1.0, 2.0]
 mag = []
 for i, s in enumerate(sources):
-    mag.append(
-        transfer_matrix.radial_lightcurve(
-            distances=distances, source_radius=s, occulter_radius=0
-        )
-    )
+    mag.append(transfer_matrix.radial_lightcurve(distances=distances, source_radius=s, occulter_radius=0))
 
 
 ## plot these
@@ -122,11 +116,7 @@ occulters = [0, 0.85, 1.0, 1.2]
 source = 0.5
 mag = []
 for i, occ in enumerate(occulters):
-    mag.append(
-        transfer_matrix.radial_lightcurve(
-            distances=distances, source_radius=source, occulter_radius=occ
-        )
-    )
+    mag.append(transfer_matrix.radial_lightcurve(distances=distances, source_radius=source, occulter_radius=occ))
 
 ## plot these
 
@@ -284,20 +274,14 @@ for i, m in enumerate(masses):
         source_sizes[i, j] = sim.source_size
         periods[i, j] = sim.orbital_period * 3600
         peak_mags[i, j] = np.max(mag - 1)
-        prob_low[i, j] = sim.best_prob_all_declinations_estimate(
-            precision=thresholds[0], threshold=1
-        )
-        prob_high[i, j] = sim.best_prob_all_declinations_estimate(
-            precision=thresholds[1], threshold=1
-        )
+        prob_low[i, j] = sim.best_prob_all_declinations_estimate(precision=thresholds[0], threshold=1)
+        prob_high[i, j] = sim.best_prob_all_declinations_estimate(precision=thresholds[1], threshold=1)
         roche[i, j] = sim.roche_lobe / sim.star_size
 
         if peak_mags[i, j] > thresholds[t]:
             vertical = "top" if i % 2 == 0 else "bottom"
             horizontal = "center" if i % 2 == 1 else "left"
-            prob = sim.best_prob_all_declinations_estimate(
-                precision=thresholds[t], threshold=1
-            )
+            prob = sim.best_prob_all_declinations_estimate(precision=thresholds[t], threshold=1)
             # text_str = f'P={prob:.2g}'
             text_str = f"1/{int(np.round(1 / prob, -1))}"
             ax.text(
@@ -343,18 +327,12 @@ for i, m in enumerate(masses):
         mag = sim.calculate()
         periods[i, j] = sim.orbital_period * 3600
         peak_mags[i, j] = np.max(mag - 1)
-        prob_low[i, j] = sim.best_prob_all_declinations_estimate(
-            precision=thresholds[0], threshold=1
-        )
-        prob_high[i, j] = sim.best_prob_all_declinations_estimate(
-            precision=thresholds[1], threshold=1
-        )
+        prob_low[i, j] = sim.best_prob_all_declinations_estimate(precision=thresholds[0], threshold=1)
+        prob_high[i, j] = sim.best_prob_all_declinations_estimate(precision=thresholds[1], threshold=1)
         roche[i, j] = sim.roche_lobe / sim.star_size
 
         if peak_mags[i, j] > thresholds[t]:
-            prob = sim.best_prob_all_declinations_estimate(
-                precision=thresholds[t], threshold=1
-            )
+            prob = sim.best_prob_all_declinations_estimate(precision=thresholds[t], threshold=1)
             # text_str = f'P={prob:.2g}'
             text_str = f"1/{int(np.round(1 / prob))}"
             ax.text(
@@ -567,9 +545,7 @@ for m in ["mid", "low", "high"]:
     )
     prob[m] = model.values * space_density * binary_fraction
 
-axes.fill_between(
-    sma, prob["low"], prob["high"], color="k", alpha=0.3, label=f"WD model"
-)
+axes.fill_between(sma, prob["low"], prob["high"], color="k", alpha=0.3, label=f"WD model")
 # axes.plot(sma, prob['mid'], color='k', label=f'{mass}M$_\odot$, {temp}$^\circ$K')
 axes.plot(sma, prob["mid"], color="k")
 
@@ -601,15 +577,15 @@ plt.savefig("plots/sensitivity_vs_model.png")
 
 # assume ds has white dwarf data
 
+import matplotlib
+
 fig, axes = plt.subplots(num=11, figsize=[12, 8])
 fig.clf()
 fig, axes = plt.subplots(num=11, figsize=[12, 8])
 
 surveys = ["TESS", "CURIOS", "LSST", "CURIOS_ARRAY"]
 markers = ["x", "v", "*", "^", "s"]
-ev = (ds.marginalized_volume * ds.probability_density).sum(
-    dim=["lens_mass", "star_mass", "lens_temp", "star_temp"]
-)
+ev = (ds.marginalized_volume * ds.probability_density).sum(dim=["lens_mass", "star_mass", "lens_temp", "star_temp"])
 sma = ev.semimajor_axis.values
 
 ev_curve = {}
@@ -691,9 +667,7 @@ fig, axes = plt.subplots(num=11, figsize=[12, 8])
 
 surveys = ["TESS", "CURIOS", "LSST", "CURIOS_ARRAY"]
 markers = ["x", "v", "*", "^", "s"]
-ev = (ds.marginalized_volume * ds.probability_density).sum(
-    dim=["lens_mass", "star_mass", "lens_temp", "star_temp"]
-)
+ev = (ds.marginalized_volume * ds.probability_density).sum(dim=["lens_mass", "star_mass", "lens_temp", "star_temp"])
 sma = ev.semimajor_axis.values
 
 ev_curve = {}
@@ -764,9 +738,7 @@ for a in sma:
 
 ax3.fill_between(sma, fwhm1, fwhm2, color="k", alpha=0.3)
 
-axes.fill_between(
-    [np.nan, np.nan], [np.nan, np.nan], color="k", alpha=0.3, label="Flare FWHM range"
-)
+axes.fill_between([np.nan, np.nan], [np.nan, np.nan], color="k", alpha=0.3, label="Flare FWHM range")
 axes.legend(loc="lower right", fontsize=14, framealpha=1)
 
 plt.show()
@@ -806,9 +778,7 @@ duty_cycle = r / sma  # in either space or time (total prob is this squared)
 num_observations = 1000  # number of observations on each target (estimate)
 # distance_pc = 1000  # distance to the target in pc
 
-number2 = (
-    number * duty_cycle**2 * num_observations
-)  #  * 4 / 3 * np.pi * distance_pc ** 3
+number2 = number * duty_cycle**2 * num_observations  #  * 4 / 3 * np.pi * distance_pc ** 3
 
 axes.plot(
     sma,

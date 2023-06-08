@@ -230,7 +230,7 @@ class Grid:
                                         survey.apply_detection_statistics(self.simulator.syst)
                                     except Exception as e:
                                         print(e)
-                                        raise (e)
+                                        raise e
                                     if len(self.simulator.syst.flare_prob[survey.name]):
                                         flare_probs.append(max(self.simulator.syst.flare_prob[survey.name]))
                                 self.timing["apply stats"] += timer() - t1
@@ -752,7 +752,7 @@ class Grid:
 
 if __name__ == "__main__":
 
-    if 0:
+    if 1:
         if len(sys.argv) > 1:
             survey_name = sys.argv[1].upper()
         else:
