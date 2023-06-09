@@ -357,13 +357,13 @@ def test_addition(counting_matrix, counting_matrix_dist1, counting_matrix_dist2)
 
     new_matrix = counting_matrix + counting_matrix_dist1
 
-    print(f"matrix1.flux= {counting_matrix.flux[0, 0, :]}")
-    print(f"matrix2.flux= {counting_matrix_dist1.flux[0, 0, :]}")
-    print(f"new_matrix.flux= {new_matrix.flux[0, 0, :]}")
-    print()
-    print(f"matrix1.distances= {counting_matrix.distances}")
-    print(f"matrix2.distances= {counting_matrix_dist1.distances}")
-    print(f"new_matrix.distances= {new_matrix.distances}")
+    # print(f"matrix1.flux= {counting_matrix.flux[0, 0, :]}")
+    # print(f"matrix2.flux= {counting_matrix_dist1.flux[0, 0, :]}")
+    # print(f"new_matrix.flux= {new_matrix.flux[0, 0, :]}")
+    # print()
+    # print(f"matrix1.distances= {counting_matrix.distances}")
+    # print(f"matrix2.distances= {counting_matrix_dist1.distances}")
+    # print(f"new_matrix.distances= {new_matrix.distances}")
 
     assert new_matrix.min_dist == counting_matrix.min_dist
     assert new_matrix.max_dist == counting_matrix_dist1.max_dist

@@ -24,7 +24,7 @@ def test_black_body(sim):
     assert abs((total_flux - sim.star_flux) / (total_flux + sim.star_flux)) < 0.01
 
 
-@pytest.mark.xfail
+# @pytest.mark.xfail
 def test_apparent_magnitudes(sim):
     # make a sun-like star and check we get the right magnitude (add BH companion that doesn't radiate)
     sim.calculate(star_mass=1, star_size=1, star_type="MS", star_temp=5778, lens_mass=30)
@@ -35,7 +35,7 @@ def test_apparent_magnitudes(sim):
     mag_bol = sim.syst.bolometric_mag()
     mag_ab = sim.syst.ab_mag(*filter_pars)
 
-    print(f"Bol mag= {mag_bol:.4g} | AB mag= {mag_ab:.4g}")
+    # print(f"Bol mag= {mag_bol:.4g} | AB mag= {mag_ab:.4g}")
     assert abs(mag_bol - 4.74) < 0.1
     assert abs(mag_ab - 4.83) < 0.1
 
@@ -45,7 +45,7 @@ def test_apparent_magnitudes(sim):
 
     mag_bol = sim.syst.apply_distance(sim.syst.bolometric_mag(), 195)  # magnitude at 195pc
     mag_ab = sim.syst.apply_distance(sim.syst.ab_mag(*filter_pars), 195)  # magnitude at 195pc
-    print(f"Bol mag= {mag_bol:.4g} | AB mag= {mag_ab:.4g}")
+    # print(f"Bol mag= {mag_bol:.4g} | AB mag= {mag_ab:.4g}")
     assert abs(mag_ab - 19.36) < 0.2  # from Gaia we get mag_g is 19.36
 
     # try another, brighter WD
@@ -53,10 +53,13 @@ def test_apparent_magnitudes(sim):
 
     mag_bol = sim.syst.apply_distance(sim.syst.bolometric_mag(), 22)
     mag_ab = sim.syst.apply_distance(sim.syst.ab_mag(*filter_pars), 22)
-    print(f"Bol mag= {mag_bol:.4g} | AB mag= {mag_ab:.4g}")
+    # print(f"Bol mag= {mag_bol:.4g} | AB mag= {mag_ab:.4g}")
     assert abs(mag_ab - 14.85) < 0.2  # from Gaia we get mag_g is 14.85
 
     # try the examples from https://ui.adsabs.harvard.edu/abs/2021ApJ...918L..14K/abstract
+    # note that the magnitudes of SkyMapper are very different from "standard filters"
+    # ref: https://skymapper.anu.edu.au/filter-transformations/
+    # so maybe that explains the discrepancy?
     # example 1: J0338
     sim.calculate(
         star_mass=0.23,
