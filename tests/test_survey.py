@@ -26,7 +26,7 @@ def test_back_of_the_envelope(sim, ztf):
     (best_prob, total_prob) = ztf.visit_prob_all_declinations(sim)
 
     # get a back of the envelope estimate for the total probability
-    total_prob_estimate = sim.visit_prob_all_declinations_estimate()
+    total_prob_estimate = sim.visit_prob_all_declinations_estimate(threshold=ztf.threshold)
 
     print(
         f"max_dec= {sim.declination:.3f} | "
@@ -52,7 +52,7 @@ def test_back_of_the_envelope(sim, ztf):
     (best_prob, total_prob) = ztf.visit_prob_all_declinations(sim)
 
     # get a back of the envelope estimate for the total probability
-    total_prob_estimate = sim.visit_prob_all_declinations_estimate()
+    total_prob_estimate = sim.visit_prob_all_declinations_estimate(threshold=ztf.threshold)
 
     print(
         f"max_dec= {sim.declination:.3f} | "
@@ -74,7 +74,7 @@ def test_back_of_the_envelope(sim, ztf):
     (best_prob, total_prob) = ztf.visit_prob_all_declinations(sim)
 
     # get a back of the envelope estimate for the total probability
-    total_prob_estimate = sim.visit_prob_all_declinations_estimate()
+    total_prob_estimate = sim.visit_prob_all_declinations_estimate(threshold=ztf.threshold)
 
     print(
         f"max_dec= {sim.declination:.3f} | "

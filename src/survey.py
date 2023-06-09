@@ -135,6 +135,18 @@ class Survey:
             visit_time = self.cadence * 24 * 3600 * self.duty_cycle / self.num_fields
             self.series_length = int(np.round((visit_time - self.slew_time) / (self.exposure_time + self.dead_time)))
 
+        elif self.cadence is not None and self.num_fields is not None and self.num_visits is None:
+            # we have fixed fields and cadences
+            # validate that we have all the needed information
+            for arg in ["duration", "series_length", "exposure_time", "slew_time", "dead_time", "field_area"]:
+                if getattr(self, arg) is None:
+                    raise ValueError(f"Cannot find number of fields/visits without {arg}")
+
+            self.num_visits = int(np.round(self.duration * 365.25 / self.cadence))
+            self.footprint = self.num_fields * self.field_area / (4 * 180**2 / np.pi)
+            total_time = self.exposure_time + self.dead_time
+            self.duty_cycle = self.num_fields * self.series_length * total_time / (self.cadence * 24 * 3600)
+
         # # we know what part of the sky we want to cover but want the cadence to be set automatically
         # elif self.cadence is None and self.num_fields is None and self.num_visits is None:
         #     # validate that we have all the needed information
@@ -589,64 +601,112 @@ def setup_default_survey(name, kwargs):
     """
 
     ###### ZTF #######
+    # ref NASA ADS: https://ui.adsabs.harvard.edu/abs/2019PASP..131a8003M/abstract
+    # ref: https://iopscience.iop.org/article/10.1088/1538-3873/aae8ac/pdf Figure 9
+    ztf_pairs = [
+        (12.5, 1),
+        (13.0, 1),
+        (13.5, 1),
+        (14.0, 1),
+        (14.5, 1),
+        (15.0, 1),
+        (15.5, 1),
+        (16.0, 1),
+        (16.5, 1),
+        (17.0, 1),
+        (17.5, 1.75),
+        (18.0, 2.5),
+        (18.5, 3.0),
+        (19.0, 4.5),
+        (19.5, 6.0),
+        (20.0, 8.5),
+        (20.5, 12),
+        (21.0, 15),
+    ]
+
+    ztf_mag = np.array([x[0] for x in ztf_pairs])
+    ztf_rms = np.array([x[1] / 100 for x in ztf_pairs])
+    ztf_dict = {
+        "name": "ZTF",
+        "telescope": "P48",
+        "field_area": 47,
+        # 'num_visits': 500,
+        "exposure_time": 30,
+        "dead_time": 10,
+        "slew_time": 0,
+        "filter": "r",
+        "limmag": 21.0,
+        "prec_list": ztf_rms,
+        "mag_list": ztf_mag,
+        "threshold": 5,
+        # 'footprint': 0.5,
+        "cadence": 1.5,  # days
+        "duty_cycle": 0.25,
+        "location": "north",
+        "longitude": None,
+        "latitude": None,
+        "elevation": None,
+        "duration": 5,  # years
+        "distances": np.geomspace(MIN_DIST_PC, 5000, 100, endpoint=True)[1:],
+    }
 
     # get these from package "ztf_wd", module "collect_summaries.py" with function "ztf_rms"
-    ztf_mag = np.arange(12.5, 21.5, 0.5)
-    ztf_rms = (
-        np.array(
-            [
-                0.01399772,
-                0.01397103,
-                0.01356743,
-                0.01314759,
-                0.01332573,
-                0.01342575,
-                0.01358046,
-                0.01439889,
-                0.01580364,
-                0.01857277,
-                0.02347019,
-                0.03147624,
-                0.0440884,
-                0.06288794,
-                0.09019933,
-                0.12347744,
-                0.15113318,
-                0.18553443,
-            ]
-        )
-        * np.log(10)
-        / 2.5
-    )
-
-    # this rough estimate using package "ztf_wd", module "make_plots.py" with function "choose_summaries"
-    # we assume these precision values go together with a 7.5 sigma cut
-    # and even then we get tens of thousands of candidates at faint magnitudes
-    ztf_rms = (
-        np.array(
-            [
-                0.11,
-                0.11,
-                0.11,
-                0.11,
-                0.11,
-                0.15,
-                0.15,
-                0.15,
-                0.17,
-                0.17,
-                0.23,
-                0.3,
-                0.47,
-                0.75,
-                1.1,
-                1.7,
-                2.5,
-                3.7,
-            ]
-        )
-        / 7.5
-    )
+    # ztf_mag = np.arange(12.5, 21.5, 0.5)
+    # ztf_rms = (
+    #     np.array(
+    #         [
+    #             0.01399772,
+    #             0.01397103,
+    #             0.01356743,
+    #             0.01314759,
+    #             0.01332573,
+    #             0.01342575,
+    #             0.01358046,
+    #             0.01439889,
+    #             0.01580364,
+    #             0.01857277,
+    #             0.02347019,
+    #             0.03147624,
+    #             0.0440884,
+    #             0.06288794,
+    #             0.09019933,
+    #             0.12347744,
+    #             0.15113318,
+    #             0.18553443,
+    #         ]
+    #     )
+    #     * np.log(10)
+    #     / 2.5
+    # )
+    #
+    # # this rough estimate using package "ztf_wd", module "make_plots.py" with function "choose_summaries"
+    # # we assume these precision values go together with a 7.5 sigma cut
+    # # and even then we get tens of thousands of candidates at faint magnitudes
+    # ztf_rms = (
+    #     np.array(
+    #         [
+    #             0.11,
+    #             0.11,
+    #             0.11,
+    #             0.11,
+    #             0.11,
+    #             0.15,
+    #             0.15,
+    #             0.15,
+    #             0.17,
+    #             0.17,
+    #             0.23,
+    #             0.3,
+    #             0.47,
+    #             0.75,
+    #             1.1,
+    #             1.7,
+    #             2.5,
+    #             3.7,
+    #         ]
+    #     )
+    #     / 7.5
+    # )
 
     ##### TESS #####
 
@@ -655,6 +715,23 @@ def setup_default_survey(name, kwargs):
     tess_rms_rough = np.array([26, 30, 35, 50, 100, 450]) * 1e-6 * 3.6
     tess_mag = np.arange(6, 15, 0.5)
     tess_rms = np.interp(tess_mag, tess_mag_rough, tess_rms_rough)
+
+    tess_dict = {
+        "name": "TESS",
+        "telescope": "TESS",
+        "field_area": 3200,
+        "exposure_time": 2 * 60,  # fast cadence
+        "cadence": 2 * 365.25,  # visit per two year
+        "series_length": 27 * 24 * 60 / 2,  # 27 days, in 2min exposures
+        "dead_time": 0,
+        "filter": "TESS",
+        "duty_cycle": 1.0,
+        "location": "space",
+        "prec_list": tess_rms,
+        "mag_list": tess_mag,
+        "duration": 5,  # years
+        "distances": np.geomspace(MIN_DIST_PC, 300, 200, endpoint=True)[1:],
+    }
 
     ##### CURIOS #####
 
@@ -682,12 +759,38 @@ def setup_default_survey(name, kwargs):
     ]
     curios_chosen_exp_time = 15  # debug only. True value should be 30
     idx = curios_exp_times.index(curios_chosen_exp_time) + 1  # plus one to account for the magnitude first element
-    curios_precision = [1 / m[idx] for m in curios_mag_snr if m[idx] > 3.0]
-    curios_mags = [m[0] for m in curios_mag_snr if m[idx] > 3.0]
+    curios_rms = np.array([1 / m[idx] for m in curios_mag_snr if m[idx] > 3.0])
+    curios_mag = [m[0] for m in curios_mag_snr if m[idx] > 3.0]
+
+    curios_exp_time = 30  # adjust from the above table using sqrt(t) scaling
+    curios_rms = curios_rms / np.sqrt(curios_exp_time / curios_chosen_exp_time)
+
+    curios_dict = {
+        "name": "CuRIOS",
+        "field_area": 32,  # 6.9 times 4.6 degree field
+        "exposure_time": curios_exp_time,
+        "filter": "r",
+        "series_length": 30,  # 15 minute visits, with 30 second exposures
+        "mag_list": curios_mag,
+        "prec_list": curios_rms,
+        "slew_time": 5,
+        # 'footprint': 1.0 / 525,
+        "cadence": 1.5 / 24,  # orbit of 1.5 hours, in units of visits per day
+        "duty_cycle": 0.95,
+        "location": "space",
+        "longitude": None,
+        "latitude": None,
+        "duration": 5,
+        "distances": np.geomspace(MIN_DIST_PC, 1000, 100, endpoint=True)[1:],
+    }
+
+    curios_array_dict = curios_dict.copy()
+    curios_array_dict["name"] = "CuRIOS Array"
+    curios_array_dict["field_area"] = 32 * 300  # assume 300 satellites
 
     #### LAST ####
 
-    last_mag_rms = [
+    last_pairs = [
         (10.0, 0.005),
         (10.5, 0.005),
         (11.0, 0.006),
@@ -707,6 +810,31 @@ def setup_default_survey(name, kwargs):
         (18.0, 0.300),
     ]
 
+    last_mag = [m[0] for m in last_pairs]
+    last_rms = [m[1] for m in last_pairs]
+
+    last_dict = {
+        "name": "LAST",
+        "telescope": '11" RASA',
+        "field_area": 355,
+        "exposure_time": 20,
+        "series_length": 20,
+        "cadence": 1.0,
+        "dead_time": 0,
+        "slew_time": 0,
+        "filter": "white",
+        "limmag": 18.0,
+        "prec_list": last_rms,
+        "mag_list": last_mag,
+        "duty_cycle": 0.25,
+        "location": "north",
+        "longitude": None,
+        "latitude": None,
+        "elevation": None,
+        "duration": 5,
+        "distances": np.geomspace(MIN_DIST_PC, 1000, 100, endpoint=True)[1:],
+    }
+
     #### LSST ####
 
     lsst_mag = np.arange(10, 25, 1.0)
@@ -722,135 +850,64 @@ def setup_default_survey(name, kwargs):
 
     lsst_rms *= np.sqrt(2)  # the above data is for two exposures of 15s
 
-    defaults = {
-        "ZTF": {
-            "name": "ZTF",
-            "telescope": "P48",
-            "field_area": 47,
-            # 'num_visits': 500,
-            "exposure_time": 30,
-            "dead_time": 10,
-            "slew_time": 0,
-            "filter": "r",
-            "limmag": 20.5,
-            "prec_list": ztf_rms,
-            "mag_list": ztf_mag,
-            "threshold": 5,
-            # 'footprint': 0.5,
-            "cadence": 1.5,
-            "duty_cycle": 0.25,
-            "location": "north",
-            "longitude": None,
-            "latitude": None,
-            "elevation": None,
-            "duration": 3,
-            "distances": np.geomspace(MIN_DIST_PC, 5000, 100, endpoint=True)[1:],
-        },
-        "LSST": {
-            "name": "LSST",
-            "telescope": "Vera Rubin 8.4m",
-            "field_area": 10,
-            # 'num_visits': 1000,
-            "exposure_time": 15,
-            "series_length": 2,
-            "dead_time": 2.5,
-            "slew_time": 5,
-            "filter": "g",
-            "limmag": 24.5,
-            # 'precision': 0.01,
-            "prec_list": lsst_rms,
-            "mag_list": lsst_mag,
-            "cadence": 3,
-            "duty_cycle": 0.25,
-            "location": "south",
-            "longitude": None,
-            "latitude": None,
-            "elevation": None,
-            "duration": 5,
-            "distances": np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:],
-        },
-        "TESS": {
-            "name": "TESS",
-            "telescope": "TESS",
-            "field_area": 3200,
-            "exposure_time": 30 * 60,
-            "cadence": 2 * 365.25,  # visit per two year
-            "series_length": 27 * 24 * 60 / 30,  # 27 days, in 30min exposures
-            "dead_time": 0,
-            "filter": "TESS",
-            "duty_cycle": 1.0,
-            "location": "space",
-            "precision": 0.01,
-            "limmag": 15,
-            "prec_list": tess_rms,
-            "mag_list": tess_mag,
-            "footprint": 1,  # entire sky
-            "duration": 5,
-            "distances": np.geomspace(MIN_DIST_PC, 300, 200, endpoint=True)[1:],
-        },
-        "CURIOS": {
-            "name": "CuRIOS",
-            # 'field_area': 5 ** 2 * np.pi,  # 10 deg f.o.v diameter
-            "field_area": 32,  # 6.9 times 4.6 degree field
-            "exposure_time": curios_chosen_exp_time,
-            "filter": "r",
-            # 'series_length': None,  # find this value automatically
-            "series_length": 30,  # 15 minute visits, with 30 second exposures
-            "mag_list": curios_mags,
-            "prec_list": curios_precision,
-            "slew_time": 5,
-            # 'footprint': 1.0 / 525,
-            "cadence": 1.5 / 24,  # orbit of 1.5 hours, in units of visits per day
-            "duty_cycle": 0.95,
-            "location": "space",
-            "longitude": None,
-            "latitude": None,
-            "duration": 5,
-            "distances": np.geomspace(MIN_DIST_PC, 1000, 100, endpoint=True)[1:],
-        },
-        "CURIOS ARRAY": {
-            "name": "CuRIOS array",
-            "field_area": 32 * 300,  # field of view times 300 satellites
-            "exposure_time": curios_chosen_exp_time,
-            "filter": "r",
-            "mag_list": curios_mags,
-            "prec_list": curios_precision,
-            # 'series_length': None,  # find this value automatically
-            "series_length": 30,  # 15 minute visits, with 30 second exposures
-            # 'footprint': 1.0,
-            "cadence": 15 / 24 / 60,  # start a new series every 15 minutes
-            "slew_time": 5,
-            "duty_cycle": 0.95,
-            "location": "space",
-            "longitude": None,
-            "latitude": None,
-            "duration": 5,
-            "distances": np.geomspace(MIN_DIST_PC, 1000, 100, endpoint=True)[1:],
-        },
-        "LAST": {
-            "name": "LAST",
-            "telescope": '11" RASA',
-            "field_area": 355,
-            "exposure_time": 20,
-            "series_length": 20,
-            "cadence": 1.0,
-            "dead_time": 0,
-            "slew_time": 0,
-            "filter": "white",
-            "limmag": 18.0,
-            "prec_list": [p[1] for p in last_mag_rms],
-            "mag_list": [p[0] for p in last_mag_rms],
-            "duty_cycle": 0.25,
-            "location": "north",
-            "longitude": None,
-            "latitude": None,
-            "elevation": None,
-            "duration": 5,
-            "distances": np.geomspace(MIN_DIST_PC, 1000, 100, endpoint=True)[1:],
-        },
+    lsst_dict = {
+        "name": "LSST",
+        "telescope": "Vera Rubin 8.4m",
+        "field_area": 10,
+        # 'num_visits': 1000,
+        "exposure_time": 15,
+        "series_length": 2,
+        "dead_time": 2.5,
+        "slew_time": 5,
+        "filter": "g",
+        # "limmag": 24.5,
+        # 'precision': 0.01,
+        "prec_list": lsst_rms,
+        "mag_list": lsst_mag,
+        "cadence": 3,
+        "duty_cycle": 0.25,
+        "location": "south",
+        "longitude": None,
+        "latitude": None,
+        "elevation": None,
+        "duration": 5,
+        "distances": np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:],
     }
 
-    name = name.upper().replace("_", " ")
+    ######## DECam DDF ########
+
+    decam_mag = np.arange(15, 24, 0.5)
+    decam_rms = np.ones(len(decam_mag)) * 0.01
+
+    decam_dict = {
+        "name": "DECam",
+        "telescope": "Blanco 4m",
+        "field_area": 3.0,
+        "exposure_time": 86,
+        "filter": "r",
+        "series_length": 15,  # five exposures in each of three filters
+        "dead_time": 15,
+        "num_fields": 9,
+        "cadence": 3.0,
+        "location": "south",
+        "duration": 2,
+        "distances": np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:],
+        "prec_list": decam_rms,
+        "mag_list": decam_mag,
+        "threshold": 5,
+    }
+
+    defaults = dict(
+        TESS=tess_dict,
+        ZTF=ztf_dict,
+        LSST=lsst_dict,
+        LAST=last_dict,
+        CURIOS=curios_dict,
+        CURIOS_ARRAY=curios_array_dict,
+        DECAM=decam_dict,
+    )
+
+    name = name.upper().replace(" ", "_")
 
     if name not in defaults:
         # raise KeyError(f'Could not find name "{kwargs["name"]}" in defaults. ')
