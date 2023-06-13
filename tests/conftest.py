@@ -40,6 +40,24 @@ def grid():
 
 
 @pytest.fixture
+def simulation_dataset():
+    CODE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    survey_names = ["ZTF", "TESS", "LSST", "CURIOS", "CURIOS_ARRAY", "LAST"]
+
+    ds = None
+    for survey in survey_names:
+        filename = os.path.join(CODE_ROOT, f"saved/simulate_{survey}_WD.nc")
+        new_ds = xr.load_dataset(filename, decode_times=False)
+        for name in ["lens_temp", "star_temp"]:
+            new_ds[name] = np.round(new_ds[name])
+
+        if ds is None:
+            ds = new_ds
+        else:
+            ds = xr.concat([ds, new_ds], dim="survey")
+
+
+@pytest.fixture
 def ztf():
     return Survey("ZTF")
 

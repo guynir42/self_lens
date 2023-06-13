@@ -764,13 +764,13 @@ if __name__ == "__main__":
         else:
             lens_type = "BH"
 
+        if lens_type not in ["WD", "BH"]:
+            raise ValueError('Value of "lens_type" must be "WD" or "BH". ' f'Instead got "{lens_type}".')
+
         if len(sys.argv) > 3:
             demo_mode = sys.argv[3].upper()
         else:
             demo_mode = "DEMO"
-
-        if lens_type not in ["WD", "BH"]:
-            raise ValueError('Value of "lens_type" must be "WD" or "BH". ' f'Instead got "{lens_type}".')
 
         if demo_mode not in ["DEMO", "FULL"]:
             raise ValueError('Value of "demo_mode" must be "DEMO" or "REAL". ' f'Instead got "{demo_mode}".')

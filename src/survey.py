@@ -599,6 +599,39 @@ def setup_default_survey(name, kwargs):
     Modify the dictionary kwargs to have all the details on the
     specific survey, using the default list of surveys we define below.
     """
+    ##### TESS #####
+
+    # this comes from the TESS references, but it seems really too optimistic
+    # TODO: find a better ref for 2min cadence
+    tess_mag_rough = np.array(list(range(6, 11)) + [15])
+    tess_rms_rough = np.array([26, 30, 35, 50, 100, 450]) * 1e-6 * 3.6
+    tess_rms_rough *= np.sqrt(30 / 2)  # adjust from 30 to 2 minute cadence
+
+    extra_tess_mag = np.arange(15.5, 19.0, 0.5)
+    extra_tess_rms = tess_rms_rough[-1] * 10 ** (-0.2 * (tess_mag_rough[-1] - extra_tess_mag))
+
+    tess_mag_rough = np.concatenate((tess_mag_rough, extra_tess_mag))
+    tess_rms_rough = np.concatenate((tess_rms_rough, extra_tess_rms))
+
+    tess_mag = np.arange(6, 19, 0.5)
+    tess_rms = np.interp(tess_mag, tess_mag_rough, tess_rms_rough)
+
+    tess_dict = {
+        "name": "TESS",
+        "telescope": "TESS",
+        "field_area": 3200,
+        "exposure_time": 2 * 60,  # fast cadence
+        "cadence": 2 * 365.25,  # visit per two year
+        "series_length": 27 * 24 * 60 / 2,  # 27 days, in 2min exposures
+        "dead_time": 0,
+        "filter": "TESS",
+        "duty_cycle": 1.0,
+        "location": "space",
+        "prec_list": tess_rms,
+        "mag_list": tess_mag,
+        "duration": 5,  # years
+        "distances": np.geomspace(MIN_DIST_PC, 300, 200, endpoint=True)[1:],
+    }
 
     ###### ZTF #######
     # ref NASA ADS: https://ui.adsabs.harvard.edu/abs/2019PASP..131a8003M/abstract
@@ -708,31 +741,106 @@ def setup_default_survey(name, kwargs):
     #     / 7.5
     # )
 
-    ##### TESS #####
+    #### LSST ####
 
-    # this comes from the TESS references, but it seems really too optimistic
-    tess_mag_rough = np.array(list(range(6, 11)) + [15])
-    tess_rms_rough = np.array([26, 30, 35, 50, 100, 450]) * 1e-6 * 3.6
-    tess_mag = np.arange(6, 15, 0.5)
-    tess_rms = np.interp(tess_mag, tess_mag_rough, tess_rms_rough)
+    lsst_mag = np.arange(10, 25, 1.0)
+    lsst_rms = np.ones(len(lsst_mag)) * 0.01
+    idx20 = np.where(lsst_mag == 20)[0][0]
 
-    tess_dict = {
-        "name": "TESS",
-        "telescope": "TESS",
-        "field_area": 3200,
-        "exposure_time": 2 * 60,  # fast cadence
-        "cadence": 2 * 365.25,  # visit per two year
-        "series_length": 27 * 24 * 60 / 2,  # 27 days, in 2min exposures
-        "dead_time": 0,
-        "filter": "TESS",
-        "duty_cycle": 1.0,
-        "location": "space",
-        "prec_list": tess_rms,
-        "mag_list": tess_mag,
-        "duration": 5,  # years
-        "distances": np.geomspace(MIN_DIST_PC, 300, 200, endpoint=True)[1:],
+    # from https://iopscience.iop.org/article/10.3847/1538-4357/ab042c/pdf table 3, page 24
+    # ref citation: https://ui.adsabs.harvard.edu/abs/2019ApJ...873..111I/abstract
+    lsst_rms[idx20 + 1] = 0.01
+    lsst_rms[idx20 + 2] = 0.02
+    lsst_rms[idx20 + 3] = 0.04
+    lsst_rms[idx20 + 4] = 0.10
+
+    lsst_rms *= np.sqrt(2)  # the above data is for two exposures of 15s
+
+    lsst_dict = {
+        "name": "LSST",
+        "telescope": "Vera Rubin 8.4m",
+        "field_area": 10,
+        # 'num_visits': 1000,
+        "exposure_time": 15,
+        "series_length": 2,
+        "dead_time": 2.5,
+        "slew_time": 5,
+        "filter": "g",
+        # "limmag": 24.5,
+        # 'precision': 0.01,
+        "prec_list": lsst_rms,
+        "mag_list": lsst_mag,
+        "cadence": 3,
+        "duty_cycle": 0.25,
+        "location": "south",
+        "longitude": None,
+        "latitude": None,
+        "elevation": None,
+        "duration": 5,
+        "distances": np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:],
     }
 
+    ######## DECam DDF ########
+
+    # noise model for DECam:
+    B = 2000  # electrons of sky background in each pixel
+    R = 12  # electrons of read noise in each pixel
+    F = 0.01  # flat field error (fractional minimal error) per source
+    A = 180  # aperture area based on 4" seeing with 0.27 scale ~ 15 pixel width
+    five_sigma_limiting_mag = 23.0
+
+    # find the flux at the five sigma detection limit
+    BN = np.sqrt(B * A)  # noise is sqrt of total background in aperture
+    RN = R * np.sqrt(A)  # read noise is given in electrons per pixel
+    flux_limit = np.sqrt(BN**2 + RN**2) * 5
+
+    # print(f'BN= {BN}, RN= {RN}, flux_limit= {flux_limit}')
+
+    def decam_flux(mag):
+        return flux_limit * 10 ** (-0.4 * (mag - five_sigma_limiting_mag))
+
+    def decam_precision(mag):
+        f = decam_flux(mag)
+        return np.sqrt(BN**2 + RN**2 + f + (F * f) ** 2) / f
+
+    # print([(m, decam_flux(m), decam_precision(m)) for m in np.arange(15, 23.5, 0.5)])
+
+    # sanity check:
+    # using AB magnitude of 23 we get a flux of
+    flux_est = 10 ** (-0.4 * (23 + 48.6))  # erg/s/cm^2/Hz
+    h = 6.626e-27  # erg s
+    c = 3e10  # cm/s
+    f1_g = c / 550e-10  # lower limit of g band
+    f2_g = c / 400e-10  # upper limit of g band
+    f_mid = (f1_g + f2_g) / 2
+    band = f2_g - f1_g
+    exp_time = 100  # seconds
+    aperture = 3.14 * (400 / 2) ** 2  # cm^2
+    QE = 0.5
+    photons = flux_est * band * aperture * exp_time / (h * f_mid) * QE
+    # print(f'photons estimate using QE = 50%: {photons}')
+
+    decam_mag = np.arange(15, 23, 0.5)
+    # decam_rms = np.ones(len(decam_mag)) * 0.01
+    decam_rms = decam_precision(decam_mag)
+
+    decam_dict = {
+        "name": "DECam",
+        "telescope": "Blanco 4m",
+        "field_area": 3.0,
+        "exposure_time": 86,
+        "filter": "r",
+        "series_length": 15,  # five exposures in each of three filters
+        "dead_time": 15,
+        "num_fields": 9,
+        "cadence": 3.0,
+        "location": "south",
+        "duration": 2,
+        "distances": np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:],
+        "prec_list": decam_rms,
+        "mag_list": decam_mag,
+        "threshold": 5,
+    }
     ##### CURIOS #####
 
     # from Hanna's email:
@@ -835,76 +943,14 @@ def setup_default_survey(name, kwargs):
         "distances": np.geomspace(MIN_DIST_PC, 1000, 100, endpoint=True)[1:],
     }
 
-    #### LSST ####
-
-    lsst_mag = np.arange(10, 25, 1.0)
-    lsst_rms = np.ones(len(lsst_mag)) * 0.01
-    idx20 = np.where(lsst_mag == 20)[0][0]
-
-    # from https://iopscience.iop.org/article/10.3847/1538-4357/ab042c/pdf table 3, page 24
-    # ref citation: https://ui.adsabs.harvard.edu/abs/2019ApJ...873..111I/abstract
-    lsst_rms[idx20 + 1] = 0.01
-    lsst_rms[idx20 + 2] = 0.02
-    lsst_rms[idx20 + 3] = 0.04
-    lsst_rms[idx20 + 4] = 0.10
-
-    lsst_rms *= np.sqrt(2)  # the above data is for two exposures of 15s
-
-    lsst_dict = {
-        "name": "LSST",
-        "telescope": "Vera Rubin 8.4m",
-        "field_area": 10,
-        # 'num_visits': 1000,
-        "exposure_time": 15,
-        "series_length": 2,
-        "dead_time": 2.5,
-        "slew_time": 5,
-        "filter": "g",
-        # "limmag": 24.5,
-        # 'precision': 0.01,
-        "prec_list": lsst_rms,
-        "mag_list": lsst_mag,
-        "cadence": 3,
-        "duty_cycle": 0.25,
-        "location": "south",
-        "longitude": None,
-        "latitude": None,
-        "elevation": None,
-        "duration": 5,
-        "distances": np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:],
-    }
-
-    ######## DECam DDF ########
-
-    decam_mag = np.arange(15, 24, 0.5)
-    decam_rms = np.ones(len(decam_mag)) * 0.01
-
-    decam_dict = {
-        "name": "DECam",
-        "telescope": "Blanco 4m",
-        "field_area": 3.0,
-        "exposure_time": 86,
-        "filter": "r",
-        "series_length": 15,  # five exposures in each of three filters
-        "dead_time": 15,
-        "num_fields": 9,
-        "cadence": 3.0,
-        "location": "south",
-        "duration": 2,
-        "distances": np.geomspace(MIN_DIST_PC, 50000, 200, endpoint=True)[1:],
-        "prec_list": decam_rms,
-        "mag_list": decam_mag,
-        "threshold": 5,
-    }
-
     defaults = dict(
         TESS=tess_dict,
         ZTF=ztf_dict,
         LSST=lsst_dict,
-        LAST=last_dict,
+        DECAM=decam_dict,
         CURIOS=curios_dict,
         CURIOS_ARRAY=curios_array_dict,
-        DECAM=decam_dict,
+        LAST=last_dict,
     )
 
     name = name.upper().replace(" ", "_")
