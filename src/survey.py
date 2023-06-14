@@ -2,13 +2,16 @@
 defines a survey class that gets a lightcurve and other metadata from the simulator
 and from that figures out the probability of detection for those system parameters.
 """
-
+import os
 import numpy as np
 import scipy.special
 from timeit import default_timer as timer
 import matplotlib.pyplot as plt
 
 from src.simulator import Simulator, default_filter, translate_time_units
+
+ROOT_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 MIN_DIST_PC = 3
 
@@ -61,6 +64,8 @@ class Survey:
         self.filter = kwargs.get("filter", "V")
         self.wavelength = None  # central wavelength (in nm)
         self.bandpass = None  # assume top-hat (in nm)
+
+        self.noise_model = kwargs.get("noise_model", None)  # optional NoiseModel object
 
         (self.wavelength, self.bandpass) = default_filter(self.filter)
 
@@ -602,19 +607,39 @@ def setup_default_survey(name, kwargs):
     ##### TESS #####
 
     # this comes from the TESS references, but it seems really too optimistic
-    # TODO: find a better ref for 2min cadence
-    tess_mag_rough = np.array(list(range(6, 11)) + [15])
-    tess_rms_rough = np.array([26, 30, 35, 50, 100, 450]) * 1e-6 * 3.6
-    tess_rms_rough *= np.sqrt(30 / 2)  # adjust from 30 to 2 minute cadence
+    # tess_mag_rough = np.array(list(range(6, 11)) + [15])
+    # tess_rms_rough = np.array([26, 30, 35, 50, 100, 450]) * 1e-6 * 3.6
+    # tess_rms_rough *= np.sqrt(30 / 2)  # adjust from 30 to 2 minute cadence
+    #
+    # extra_tess_mag = np.arange(15.5, 19.0, 0.5)
+    # extra_tess_rms = tess_rms_rough[-1] * 10 ** (-0.2 * (tess_mag_rough[-1] - extra_tess_mag))
+    #
+    # tess_mag_rough = np.concatenate((tess_mag_rough, extra_tess_mag))
+    # tess_rms_rough = np.concatenate((tess_rms_rough, extra_tess_rms))
+    #
+    # tess_mag = np.arange(6, 19, 0.5)
+    # tess_rms = np.interp(tess_mag, tess_mag_rough, tess_rms_rough)
 
-    extra_tess_mag = np.arange(15.5, 19.0, 0.5)
-    extra_tess_rms = tess_rms_rough[-1] * 10 ** (-0.2 * (tess_mag_rough[-1] - extra_tess_mag))
-
-    tess_mag_rough = np.concatenate((tess_mag_rough, extra_tess_mag))
-    tess_rms_rough = np.concatenate((tess_rms_rough, extra_tess_rms))
-
-    tess_mag = np.arange(6, 19, 0.5)
-    tess_rms = np.interp(tess_mag, tess_mag_rough, tess_rms_rough)
+    # ref: https://heasarc.gsfc.nasa.gov/docs/tess/observing-technical.html
+    # the above reference gives the precision in PPM. I copied the middle of the
+    # red cloud of points. Also, this is for 1-hour, so it needs to be scaled to 2min.
+    tess_mag_rms = [
+        (6, 60),
+        (7, 90),
+        (8, 110),
+        (9, 150),
+        (10, 230),
+        (11, 350),
+        (12, 600),
+        (13, 1500),
+        (14, 3500),
+        (15, 9000),
+        (16, 25000),
+    ]
+    tess_mag, tess_rms = zip(*tess_mag_rms)
+    tess_rms = np.array(tess_rms, dtype=float)
+    tess_rms *= np.sqrt(60 / 2)  # adjust from 60 to 2 minute cadence
+    tess_rms *= 1e-6  # adjust from PPM to fractional rms
 
     tess_dict = {
         "name": "TESS",
@@ -663,7 +688,6 @@ def setup_default_survey(name, kwargs):
         "name": "ZTF",
         "telescope": "P48",
         "field_area": 47,
-        # 'num_visits': 500,
         "exposure_time": 30,
         "dead_time": 10,
         "slew_time": 0,
@@ -672,7 +696,6 @@ def setup_default_survey(name, kwargs):
         "prec_list": ztf_rms,
         "mag_list": ztf_mag,
         "threshold": 5,
-        # 'footprint': 0.5,
         "cadence": 1.5,  # days
         "duty_cycle": 0.25,
         "location": "north",
@@ -760,14 +783,11 @@ def setup_default_survey(name, kwargs):
         "name": "LSST",
         "telescope": "Vera Rubin 8.4m",
         "field_area": 10,
-        # 'num_visits': 1000,
         "exposure_time": 15,
         "series_length": 2,
         "dead_time": 2.5,
         "slew_time": 5,
         "filter": "g",
-        # "limmag": 24.5,
-        # 'precision': 0.01,
         "prec_list": lsst_rms,
         "mag_list": lsst_mag,
         "cadence": 3,
@@ -782,47 +802,23 @@ def setup_default_survey(name, kwargs):
 
     ######## DECam DDF ########
 
-    # noise model for DECam:
-    B = 2000  # electrons of sky background in each pixel
-    R = 12  # electrons of read noise in each pixel
-    F = 0.01  # flat field error (fractional minimal error) per source
-    A = 180  # aperture area based on 4" seeing with 0.27 scale ~ 15 pixel width
-    five_sigma_limiting_mag = 23.0
-
-    # find the flux at the five sigma detection limit
-    BN = np.sqrt(B * A)  # noise is sqrt of total background in aperture
-    RN = R * np.sqrt(A)  # read noise is given in electrons per pixel
-    flux_limit = np.sqrt(BN**2 + RN**2) * 5
-
-    # print(f'BN= {BN}, RN= {RN}, flux_limit= {flux_limit}')
-
-    def decam_flux(mag):
-        return flux_limit * 10 ** (-0.4 * (mag - five_sigma_limiting_mag))
-
-    def decam_precision(mag):
-        f = decam_flux(mag)
-        return np.sqrt(BN**2 + RN**2 + f + (F * f) ** 2) / f
-
-    # print([(m, decam_flux(m), decam_precision(m)) for m in np.arange(15, 23.5, 0.5)])
-
-    # sanity check:
-    # using AB magnitude of 23 we get a flux of
-    flux_est = 10 ** (-0.4 * (23 + 48.6))  # erg/s/cm^2/Hz
-    h = 6.626e-27  # erg s
-    c = 3e10  # cm/s
-    f1_g = c / 550e-10  # lower limit of g band
-    f2_g = c / 400e-10  # upper limit of g band
-    f_mid = (f1_g + f2_g) / 2
-    band = f2_g - f1_g
-    exp_time = 100  # seconds
-    aperture = 3.14 * (400 / 2) ** 2  # cm^2
-    QE = 0.5
-    photons = flux_est * band * aperture * exp_time / (h * f_mid) * QE
-    # print(f'photons estimate using QE = 50%: {photons}')
-
+    noise_model = NoiseModel(
+        background=20,
+        dark_current=0,
+        read_noise=12,
+        fractional_error=0.01,
+        num_pixels=180,
+        aperture=3.14 * (400 / 2) ** 2,
+        exposure_time=100,
+        quantum_efficiency=0.5,
+        transmission=0.5,
+        lower_wavelength=400,
+        upper_wavelength=550,
+        limiting_mag=23,
+        sigmas_lim=5,
+    )
     decam_mag = np.arange(15, 23, 0.5)
-    # decam_rms = np.ones(len(decam_mag)) * 0.01
-    decam_rms = decam_precision(decam_mag)
+    decam_rms = noise_model.calc_using_background(decam_mag)
 
     decam_dict = {
         "name": "DECam",
@@ -840,49 +836,72 @@ def setup_default_survey(name, kwargs):
         "prec_list": decam_rms,
         "mag_list": decam_mag,
         "threshold": 5,
+        "noise_model": noise_model,
     }
+
     ##### CURIOS #####
 
     # from Hanna's email:
     # The table below contains values of the expected SNR for different source magnitudes and integration
     # times for the CuRIOS monolithic, 15 cm optic and Sony IMS455 design. All values were taken for r-band
     # observations.
-    curios_exp_times = [1, 15, 60, 300, 900]
-    curios_mag_snr = [
-        (14.0, 9.676, 37.789, 75.613, 169.1, 292.9),
-        (14.5, 7.49, 29.4, 58.8, 131.55, 227.85),
-        (15.0, 5.73, 22.6, 22.61, 45.28, 101.265, 175.4),
-        (15.5, 4.3104, 17.146, 34.342, 76.822, 133.069),
-        (16.0, 3.173, 12.750, 25.553, 57.170, 99.031),
-        (16.5, 2.279, 9.261, 18.574, 41.563, 71.998),
-        (17.0, 2.279, 9.261, 18.574, 41.563, 71.998),
-        (17.5, 1.594, 6.555, 13.155, 29.444, 51.006),
-        (18.0, 0.726, 3.045, 6.120, 13.702, 23.738),
-        (18.5, 0.476, 2.012, 4.046, 9.060, 15.696),
-        (19.0, 0.308, 1.310, 2.635, 5.902, 10.225),
-        (19.5, 0.198, 0.844, 1.698, 3.804, 6.591),
-        (20.0, 0.126, 0.540, 1.086, 2.434, 4.216),
-        (20.5, 0.080, 0.343, 0.691, 1.549, 2.684),
-        (21.0, 0.050, 0.218, 0.439, 0.983, 1.703),
-    ]
-    curios_chosen_exp_time = 15  # debug only. True value should be 30
-    idx = curios_exp_times.index(curios_chosen_exp_time) + 1  # plus one to account for the magnitude first element
-    curios_rms = np.array([1 / m[idx] for m in curios_mag_snr if m[idx] > 3.0])
-    curios_mag = [m[0] for m in curios_mag_snr if m[idx] > 3.0]
+    # curios_exp_times = [1, 15, 60, 300, 900]
+    # curios_mag_snr = [
+    #     (14.0, 9.676, 37.789, 75.613, 169.1, 292.9),
+    #     (14.5, 7.49, 29.4, 58.8, 131.55, 227.85),
+    #     (15.0, 5.73, 22.6, 22.61, 45.28, 101.265, 175.4),
+    #     (15.5, 4.3104, 17.146, 34.342, 76.822, 133.069),
+    #     (16.0, 3.173, 12.750, 25.553, 57.170, 99.031),
+    #     (16.5, 2.279, 9.261, 18.574, 41.563, 71.998),
+    #     (17.0, 2.279, 9.261, 18.574, 41.563, 71.998),
+    #     (17.5, 1.594, 6.555, 13.155, 29.444, 51.006),
+    #     (18.0, 0.726, 3.045, 6.120, 13.702, 23.738),
+    #     (18.5, 0.476, 2.012, 4.046, 9.060, 15.696),
+    #     (19.0, 0.308, 1.310, 2.635, 5.902, 10.225),
+    #     (19.5, 0.198, 0.844, 1.698, 3.804, 6.591),
+    #     (20.0, 0.126, 0.540, 1.086, 2.434, 4.216),
+    #     (20.5, 0.080, 0.343, 0.691, 1.549, 2.684),
+    #     (21.0, 0.050, 0.218, 0.439, 0.983, 1.703),
+    # ]
+    # curios_chosen_exp_time = 15  # debug only. True value should be 30
+    # idx = curios_exp_times.index(curios_chosen_exp_time) + 1  # plus one to account for the magnitude first element
+    # curios_rms = np.array([1 / m[idx] for m in curios_mag_snr if m[idx] > 3.0])
+    # curios_mag = [m[0] for m in curios_mag_snr if m[idx] > 3.0]
+    #
+    # curios_exp_time = 30  # adjust from the above table using sqrt(t) scaling
+    # curios_rms = curios_rms / np.sqrt(curios_exp_time / curios_chosen_exp_time)
 
-    curios_exp_time = 30  # adjust from the above table using sqrt(t) scaling
-    curios_rms = curios_rms / np.sqrt(curios_exp_time / curios_chosen_exp_time)
+    noise_model = NoiseModel(
+        background=0.2,
+        dark_current=0,
+        read_noise=1,
+        fractional_error=0.01,
+        num_pixels=1,
+        aperture=3.14 * (15 / 2) ** 2,
+        exposure_time=30,
+        quantum_efficiency=0.6,
+        transmission=0.5,
+        lower_wavelength=550,
+        upper_wavelength=700,
+        limiting_mag=17.3,
+        sigmas_lim=10,
+    )
+
+    # curios_mag = np.arange(10.0, 20.0, 0.5)
+    # curios_rms = noise_model.calc_using_background(np.array(curios_mag))
+
+    curios_mag, curios_snr = np.loadtxt(os.path.join(ROOT_FOLDER, "data/CuRIOS_SNR_v_mag_30sec.txt"), unpack=True)
+    curios_rms = 1 / curios_snr
 
     curios_dict = {
         "name": "CuRIOS",
         "field_area": 32,  # 6.9 times 4.6 degree field
-        "exposure_time": curios_exp_time,
+        "exposure_time": 30,
         "filter": "r",
         "series_length": 30,  # 15 minute visits, with 30 second exposures
         "mag_list": curios_mag,
         "prec_list": curios_rms,
         "slew_time": 5,
-        # 'footprint': 1.0 / 525,
         "cadence": 1.5 / 24,  # orbit of 1.5 hours, in units of visits per day
         "duty_cycle": 0.95,
         "location": "space",
@@ -890,6 +909,7 @@ def setup_default_survey(name, kwargs):
         "latitude": None,
         "duration": 5,
         "distances": np.geomspace(MIN_DIST_PC, 1000, 100, endpoint=True)[1:],
+        "noise_model": noise_model,
     }
 
     curios_array_dict = curios_dict.copy()
@@ -898,28 +918,49 @@ def setup_default_survey(name, kwargs):
 
     #### LAST ####
 
+    # ref: from Eran's paper: https://arxiv.org/abs/2304.04796 Figure 16
+    # in this plot we get the S/N for each mag bin
+    # We look at the blue plot since WDs are bluer than average
     last_pairs = [
-        (10.0, 0.005),
-        (10.5, 0.005),
-        (11.0, 0.006),
-        (11.5, 0.007),
-        (12.0, 0.008),
-        (12.5, 0.009),
-        (13.0, 0.010),
-        (13.5, 0.014),
-        (14.0, 0.020),
-        (14.5, 0.028),
-        (15.0, 0.040),
-        (15.5, 0.055),
-        (16.0, 0.077),
-        (16.5, 0.110),
-        (17.0, 0.152),
-        (17.5, 0.214),
-        (18.0, 0.300),
+        (16.5, 40),
+        (17.0, 32),
+        (17.5, 20),
+        (18.0, 12),
+        (18.5, 7.5),
+        (19.0, 5.0),
+        (19.5, 3.0),
     ]
-
     last_mag = [m[0] for m in last_pairs]
-    last_rms = [m[1] for m in last_pairs]
+    last_snr = [m[1] for m in last_pairs]
+
+    # add some brighter magnitudes, assume precision tops off at 50
+    last_mag = np.concatenate((np.arange(10.0, 16.5, 0.5), last_mag))
+    last_snr = np.concatenate((np.full(13, 50), last_snr))
+
+    last_rms = 1 / last_snr
+
+    # last_pairs = [
+    #     (10.0, 0.005),
+    #     (10.5, 0.005),
+    #     (11.0, 0.006),
+    #     (11.5, 0.007),
+    #     (12.0, 0.008),
+    #     (12.5, 0.009),
+    #     (13.0, 0.010),
+    #     (13.5, 0.014),
+    #     (14.0, 0.020),
+    #     (14.5, 0.028),
+    #     (15.0, 0.040),
+    #     (15.5, 0.055),
+    #     (16.0, 0.077),
+    #     (16.5, 0.110),
+    #     (17.0, 0.152),
+    #     (17.5, 0.214),
+    #     (18.0, 0.300),
+    # ]
+    #
+    # last_mag = [m[0] for m in last_pairs]
+    # last_rms = [m[1] for m in last_pairs]
 
     last_dict = {
         "name": "LAST",
@@ -965,6 +1006,113 @@ def setup_default_survey(name, kwargs):
             kwargs[k] = v
 
 
+class NoiseModel:
+    def __init__(self, **kwargs):
+        self.read_noise = kwargs.pop("read_noise", 0)  # electrons per pixel per image
+        self.dark_current = kwargs.pop("dark_current", 0)  # electrons per pixel per second
+        self.background = kwargs.pop("background", 0)  # electrons per pixel per second
+        self.fractional_error = kwargs.pop("fractional_error", 0.01)  # flat field error (fraction of flux)
+        self.num_pixels = kwargs.pop("num_pixels", np.pi * 3**2)  # number of pixels in the photometric aperture
+
+        self.aperture = kwargs.pop("aperture", None)  # cm
+        self.exposure_time = kwargs.pop("exposure_time", None)  # seconds
+
+        self.limiting_mag = kwargs.pop("limiting_mag", None)  # mag
+        self.sigmas_lim = kwargs.pop("sigmas_lim", 5)  # how many standard deviations is the noise at limiting mag?
+
+        self.quantum_efficiency = kwargs.pop("quantum_efficiency", 0.9)  # fraction
+        self.transmission = kwargs.pop("transmission", 1.0)  # fraction (set 1.0 for space)
+
+        self.lower_wavelength = kwargs.pop("lower_wavelength", 400)  # nm
+        self.upper_wavelength = kwargs.pop("upper_wavelength", 1000)  # nm
+
+        self.magnitudes = None
+        self.phot_rms = None
+
+    def calc_using_background(self, mags):
+        """
+        Calculate the noise using the background flux, to find the flux at the limiting magnitude.
+        This does not directly estimate the flux using the given magnitude.
+        Instead, it assumes some S/N at the limiting mag, based on the background/read noise/dark current.
+
+        Parameters
+        ----------
+        mags: array
+            The magnitudes at which to calculate the noise.
+
+        Returns
+        -------
+        rms: array
+            The fractional noise RMS at each magnitude.
+        """
+        self.magnitudes = mags
+
+        # all the different kinds of noise
+        B = self.background  # electrons of sky background in each pixel
+        R = self.read_noise  # electrons of read noise in each pixel
+        D = self.dark_current  # electrons of dark current in each pixel
+        F = self.fractional_error  # flat field error (fractional minimal error) per source
+        N = self.num_pixels  # number of pixels in the photometric aperture
+        T = self.exposure_time  # exposure time in seconds
+        lim = self.limiting_mag  # limiting magnitude
+        sig = self.sigmas_lim  # how many sigma is the limiting magnitude?
+
+        # find the flux at the five sigma detection limit
+        BN = np.sqrt(B * T * N)  # noise is sqrt of total background in aperture
+        DN = np.sqrt(D * T * N)  # noise is sqrt of total dark current in aperture
+        RN = R * np.sqrt(N)  # read noise is given in electrons per pixel
+        flux_limit = np.sqrt(BN**2 + DN**2 + RN**2) * sig  # flux at the limiting magnitude
+        fluxes = flux_limit * 10 ** (-0.4 * (mags - lim))  # fluxes of the sources
+
+        rms = np.sqrt(BN**2 + DN**2 + RN**2 + fluxes + (F * fluxes) ** 2) / fluxes
+        self.phot_rms = rms
+
+        return rms
+
+    def calc_using_ab_magnitude(self, mags):
+        """
+        Find the fractional noise based on estimating the number of photons at each magnitude.
+
+        Parameters
+        ----------
+        mags: array
+            The magnitudes at which to calculate the noise.
+
+        Returns
+        -------
+        rms: array
+            The fractional noise RMS at each magnitude.
+        """
+        B = self.background  # electrons of sky background in each pixel
+        R = self.read_noise  # electrons of read noise in each pixel
+        D = self.dark_current  # electrons of dark current in each pixel
+        N = self.num_pixels  # number of pixels in the photometric aperture
+        F = self.fractional_error  # flat field error (fractional minimal error) per source
+        A = self.aperture  # aperture area based on 4" seeing with 0.27 scale ~ 15 pixel width
+        T = self.exposure_time  # exposure time in seconds
+        QET = self.quantum_efficiency * self.transmission  # quantum efficiency of the detector
+
+        flux_est = 10 ** (-0.4 * (mags + 48.6))  # erg/s/cm^2/Hz
+        h = 6.626e-27  # erg s
+        c = 3e10  # cm/s
+        f1_g = c / self.upper_wavelength * 1e-10  # lower limit of g band
+        f2_g = c / self.lower_wavelength * 1e-10  # upper limit of g band
+        f_mid = (f1_g + f2_g) / 2
+        band = f2_g - f1_g
+
+        BN = np.sqrt(B * T * N)  # noise is sqrt of total background in aperture
+        DN = np.sqrt(D * T * N)  # noise is sqrt of total dark current in aperture
+        RN = R * np.sqrt(N)  # read noise is given in electrons per pixel
+
+        photons = flux_est * band / (h * f_mid) * QET * A * T  # photons per pixel
+        # print(photons)
+        # print(f'BN: {BN}, DN: {DN}, RN: {RN}')
+        rms = np.sqrt(BN**2 + DN**2 + RN**2 + photons + (F * photons) ** 2) / photons
+        self.phot_rms = rms
+
+        return rms
+
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import numpy as np
@@ -978,6 +1126,25 @@ if __name__ == "__main__":
         declination=0.000,
         semimajor_axis=0.18,
     )
+
+    decam = Survey("decam")
+    # mags = np.arange(10, 23.5, 0.5)
+    # rms1 = decam.noise_model.calc_using_background(mags)
+    # rms2 = decam.noise_model.calc_using_ab_magnitude(mags)
+    #
+    # plt.plot(mags, rms1, label='background')
+    # plt.plot(mags, rms2, label='ab mag')
+    # plt.legend()
+
+    curios = Survey("curios")
+    mags = np.arange(10, 20.0, 0.5)
+    rms1 = curios.noise_model.calc_using_background(mags)
+    rms2 = curios.noise_model.calc_using_ab_magnitude(mags)
+
+    plt.plot(mags, rms1, label="limmag")
+    plt.plot(mags, rms2, label="ab mag")
+    plt.plot(curios.mag_list, curios.prec_list, label="email")
+    plt.legend()
 
     # sim.syst.plot()
 
