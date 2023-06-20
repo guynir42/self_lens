@@ -12,6 +12,9 @@ from src.simulator import Simulator
 from src.survey import Survey
 
 
+CODE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 class Grid:
     def __init__(self, wd_lens=True):
         self.star_masses = None
@@ -118,7 +121,7 @@ class Grid:
             Survey("TESS"),
             Survey("CURIOS"),
             Survey("CURIOS_ARRAY"),
-            # Survey('LAST'),
+            Survey("LAST"),
         ]
 
     def get_num_parameters(self):
@@ -137,21 +140,33 @@ class Grid:
 
         return total_size_bytes / 1024**3  # return GBs
 
-    def run_simulation(self, keep_systems=False, **kwargs):
+    def run_simulation(self, keep_systems=False, filename=None, load_backups=False, backup_interval=100):
         """
         Apply the probability estimates from
         self.surveys to all the systems in the parameter grid.
         All the results are saved in self.systems.
 
-        Optional Parameters
-        -------------------
-            ...
+        Parameters
+        ----------
+        keep_systems: bool
+            If True, will keep the systems in memory.
+            If False, will delete them after the simulation is complete.
+        filename: str (optional)
+            Path to the saved netcdf file containing the datasets.
+            If None, will not save anything.
+        load_backups: bool
+            If True, will load the systems from the backup file.
+        backup_interval: int
+            How many semimajor axis steps to take before backing up the results.
+            If None, will not save intermediate backups. Default is 100.
 
         """
+        self.dataset = None
         self.timing = defaultdict(float)
         self.systems = []
         num = int(self.get_num_parameters() / len(self.declinations))
         div = 10 ** int(np.log10(num) - 1)
+        survey_names = [s.name for s in self.surveys]
 
         # build data structures to contain the results
         memory_gb = self.memory_size()
@@ -160,50 +175,33 @@ class Grid:
         if memory_gb > psutil.virtual_memory().available / 1024**3:
             raise MemoryError(f"Array size required ({memory_gb:.2f} GB) exceeds available memory")
 
-        coords = {
-            "lens_temp": self.lens_temperatures,
-            "star_temp": self.star_temperatures,
-            "lens_mass": self.lens_masses,
-            "star_mass": self.star_masses,
-            "semimajor_axis": self.semimajor_axes,
-            "declination": self.declinations,
-        }
-        survey_names = [s.name for s in self.surveys]
-        coord_names = list(coords.keys())
-        coord_lengths = tuple(len(v) for v in coords.values())
-        nan_array = np.empty(coord_lengths, dtype=np.float32)
-        nan_array[:] = np.nan
-        zeros_array = np.zeros((len(self.surveys),) + coord_lengths, dtype=np.float32)
-
-        data_vars = {
-            "system_index": (coord_names, nan_array.copy()),
-            "orbital_period": (coord_names, nan_array.copy()),
-            "peak_magnification": (coord_names, nan_array.copy()),
-            "fwhm": (coord_names, nan_array.copy()),
-            "distance": (["survey"] + coord_names, zeros_array.copy()),
-            "volume": (["survey"] + coord_names, zeros_array.copy()),
-            "total_volume": (["survey"] + coord_names, zeros_array.copy()),
-            "flare_duration": (["survey"] + coord_names, zeros_array.copy()),
-            "flare_prob": (["survey"] + coord_names, zeros_array.copy()),
-            "duty_cycle": (["survey"] + coord_names, zeros_array.copy()),
-            "visit_prob": (["survey"] + coord_names, zeros_array.copy()),
-            "total_prob": (["survey"] + coord_names, zeros_array.copy()),
-            "visit_detections": (["survey"] + coord_names, zeros_array.copy()),
-            "total_detections": (["survey"] + coord_names, zeros_array.copy()),
-            "effective_volume": (["survey"] + coord_names, zeros_array.copy()),
-        }
-
-        # add the survey coordinate as well
-        coords["survey"] = survey_names
-
         print(f"Running a grid with {len(self.surveys)} surveys and {num} parameters (not including dec.). ")
         t0 = timer()
         count = 0
-        for lt, lens_temp in enumerate(self.lens_temperatures):
-            for st, star_temp in enumerate(self.star_temperatures):
-                for ml, lens_mass in enumerate(self.lens_masses):
-                    for ms, star_mass in enumerate(self.star_masses):
-                        for a, sma in enumerate(self.semimajor_axes):
+
+        if filename is not None and load_backups:
+            try:
+                self.dataset = xr.open_dataset(filename + ".backup")
+                self.dataset["fwhm"].values = self.dataset["fwhm"].values.astype(np.float32)
+                self.dataset["orbital_period"].values = self.dataset["orbital_period"].values.astype(np.float32)
+                self.dataset["scanned_semimajor_axes"] = self.dataset["scanned_semimajor_axes"].astype(bool)
+
+            except:
+                pass
+        if self.dataset is not None:
+            print(f"Loaded backup file {filename}.backup")
+        else:
+            self.make_xarray()
+
+        for a, sma in enumerate(self.semimajor_axes):
+            if self.dataset is not None and self.dataset["scanned_semimajor_axes"].loc[sma]:
+                # print(f"Semimajor axis {sma} already scanned. Skipping.")
+                continue
+            # print(f'Scanning semimajor axis {sma}')
+            for lt, lens_temp in enumerate(self.lens_temperatures):
+                for st, star_temp in enumerate(self.star_temperatures):
+                    for ml, lens_mass in enumerate(self.lens_masses):
+                        for ms, star_mass in enumerate(self.star_masses):
                             for d, dec in enumerate(self.declinations):
                                 try:
                                     t1 = timer()
@@ -240,44 +238,50 @@ class Grid:
 
                                 t1 = timer()
                                 s = self.simulator.syst  # shorthand
-                                data_vars["orbital_period"][1][lt, st, ml, ms, a, d] = float(s.orbital_period)
-                                data_vars["peak_magnification"][1][lt, st, ml, ms, a, d] = max(s.magnifications)
-                                data_vars["fwhm"][1][lt, st, ml, ms, a, d] = float(s.fwhm)
+                                self.dataset["orbital_period"].values[lt, st, ml, ms, a, d] = float(s.orbital_period)
+                                self.dataset["peak_magnification"].values[lt, st, ml, ms, a, d] = max(s.magnifications)
+                                self.dataset["fwhm"].values[lt, st, ml, ms, a, d] = float(s.fwhm)
 
                                 for i, sur in enumerate(survey_names):
 
                                     if len(s.flare_prob[sur]):  # if not, leave zeros for all
-                                        data_vars["distance"][1][i, lt, st, ml, ms, a, d] = max(s.distances[sur])
-                                        data_vars["volume"][1][i, lt, st, ml, ms, a, d] = np.sum(s.volumes[sur])
-                                        data_vars["total_volume"][1][i, lt, st, ml, ms, a, d] = np.sum(
+                                        self.dataset["distance"].values[i, lt, st, ml, ms, a, d] = max(s.distances[sur])
+                                        self.dataset["volume"].values[i, lt, st, ml, ms, a, d] = np.sum(s.volumes[sur])
+                                        self.dataset["total_volume"].values[i, lt, st, ml, ms, a, d] = np.sum(
                                             s.total_volumes[sur]
                                         )
-                                        data_vars["flare_duration"][1][i, lt, st, ml, ms, a, d] = max(
+                                        self.dataset["flare_duration"].values[i, lt, st, ml, ms, a, d] = max(
                                             s.flare_durations[sur]
                                         )
-                                        data_vars["flare_prob"][1][i, lt, st, ml, ms, a, d] = max(s.flare_prob[sur])
+                                        self.dataset["flare_prob"].values[i, lt, st, ml, ms, a, d] = max(
+                                            s.flare_prob[sur]
+                                        )
                                         duty_cycle = max(s.flare_durations[sur]) / (s.orbital_period * 3600)
-                                        data_vars["duty_cycle"][1][i, lt, st, ml, ms, a, d] = duty_cycle
-                                        data_vars["visit_prob"][1][i, lt, st, ml, ms, a, d] = max(s.visit_prob[sur])
-                                        data_vars["total_prob"][1][i, lt, st, ml, ms, a, d] = max(s.total_prob[sur])
-                                        data_vars["visit_detections"][1][i, lt, st, ml, ms, a, d] = max(
+                                        self.dataset["duty_cycle"].values[i, lt, st, ml, ms, a, d] = duty_cycle
+                                        self.dataset["visit_prob"].values[i, lt, st, ml, ms, a, d] = max(
+                                            s.visit_prob[sur]
+                                        )
+                                        self.dataset["total_prob"].values[i, lt, st, ml, ms, a, d] = max(
+                                            s.total_prob[sur]
+                                        )
+                                        self.dataset["visit_detections"].values[i, lt, st, ml, ms, a, d] = max(
                                             s.visit_detections[sur]
                                         )
-                                        data_vars["total_detections"][1][i, lt, st, ml, ms, a, d] = max(
+                                        self.dataset["total_detections"].values[i, lt, st, ml, ms, a, d] = max(
                                             s.total_detections[sur]
                                         )
-                                        data_vars["effective_volume"][1][i, lt, st, ml, ms, a, d] = s.effective_volumes[
-                                            sur
-                                        ]
+                                        self.dataset["effective_volume"].values[
+                                            i, lt, st, ml, ms, a, d
+                                        ] = s.effective_volumes[sur]
 
                                 if keep_systems:
                                     # self.simulator.syst.magnifications = None
                                     # self.simulator.syst.timestamps = None
                                     self.systems.append(self.simulator.syst)  # add this system to the list
-                                    data_vars["system_index"][1][lt, st, ml, ms, a, d] = len(self.systems) - 1
+                                    self.dataset["system_index"].values[lt, st, ml, ms, a, d] = len(self.systems) - 1
 
-                                self.timing["store data"] += timer() - t1
-
+                                self.timing["assign values"] += timer() - t1
+                                # printout progress:
                             count += 1  # number of parameters already covered, not including declination
                             if count > 0 and count % div == 0:
                                 current_time = timer() - t0
@@ -288,10 +292,24 @@ class Grid:
                                     f"{self.human_readable_time(total_time)}"
                                 )
 
-        print(f"Successfully generated {count} systems in {timer() - t0:.1f}s.")
-        self.make_xarray(coords, data_vars)
+            self.dataset["scanned_semimajor_axes"].values[a] = True
+            # save backups
+            t1 = timer()
+            if filename is not None and backup_interval is not None and (a + 1) % backup_interval == 0:
+                print(f"Saving backup to {filename}.backup")
+                self.dataset.to_netcdf(filename + ".backup")
+            self.timing["save backups"] += timer() - t1
 
-    def make_xarray(self, coords, data_vars):
+        print(f"Successfully generated {count} systems in {timer() - t0:.1f}s.")
+        if filename is not None:
+            print(f"Saving to {filename}")
+            self.dataset.to_netcdf(filename)
+            try:
+                os.remove(filename + ".backup")
+            except FileNotFoundError:
+                pass
+
+    def make_xarray(self):
         """
         Set up an xarray holding the simulation results.
 
@@ -302,41 +320,41 @@ class Grid:
         data_vars: dict
             Data variables dictionary
         """
+        coords = {
+            "lens_temp": self.lens_temperatures,
+            "star_temp": self.star_temperatures,
+            "lens_mass": self.lens_masses,
+            "star_mass": self.star_masses,
+            "semimajor_axis": self.semimajor_axes,
+            "declination": self.declinations,
+        }
+        survey_names = [s.name for s in self.surveys]
+        coord_names = list(coords.keys())
+        coord_lengths = tuple(len(v) for v in coords.values())
+        nan_array = np.empty(coord_lengths, dtype=np.float32)
+        nan_array[:] = np.nan
+        zeros_array = np.zeros((len(self.surveys),) + coord_lengths, dtype=np.float32)
 
-        # coords = {
-        #     'lens_temp': self.lens_temperatures,
-        #     'star_temp': self.star_temperatures,
-        #     'lens_mass': self.lens_masses,
-        #     'star_mass': self.star_masses,
-        #     'semimajor_axis': self.semimajor_axes,
-        #     'declination': self.declinations,
-        # }
-        # survey_names = [s.name for s in self.surveys]
-        # coord_names = list(coords.keys())
-        # coord_lengths = tuple(len(v) for v in coords.values())
-        #
-        # coords['survey'] = survey_names  # add another coordinate to keep track of different survey's results
-        #
-        # nan_array = np.empty(coord_lengths)
-        # nan_array[:] = np.nan
-        # zeros_array = np.zeros(coord_lengths + (len(self.surveys),))
-        #
-        # data_vars = {
-        #     'system_index': (coord_names, nan_array.copy()),
-        #     'orbital_period': (coord_names, nan_array.copy()),
-        #     'peak_magnification': (coord_names, nan_array.copy()),
-        #     'distance': (coord_names + ['survey'], zeros_array.copy()),
-        #     'volume': (coord_names + ['survey'], zeros_array.copy()),
-        #     'total_volume': (coord_names + ['survey'], zeros_array.copy()),
-        #     'flare_duration': (coord_names + ['survey'], zeros_array.copy()),
-        #     'flare_prob': (coord_names + ['survey'], zeros_array.copy()),
-        #     'duty_cycle': (coord_names + ['survey'], zeros_array.copy()),
-        #     'visit_prob': (coord_names + ['survey'], zeros_array.copy()),
-        #     'total_prob': (coord_names + ['survey'], zeros_array.copy()),
-        #     'visit_detections': (coord_names + ['survey'], zeros_array.copy()),
-        #     'total_detections': (coord_names + ['survey'], zeros_array.copy()),
-        #     'effective_volume': (coord_names + ['survey'], zeros_array.copy()),
-        # }
+        data_vars = {
+            "system_index": (coord_names, nan_array.copy()),
+            "orbital_period": (coord_names, nan_array.copy()),
+            "peak_magnification": (coord_names, nan_array.copy()),
+            "fwhm": (coord_names, nan_array.copy()),
+            "distance": (["survey"] + coord_names, zeros_array.copy()),
+            "volume": (["survey"] + coord_names, zeros_array.copy()),
+            "total_volume": (["survey"] + coord_names, zeros_array.copy()),
+            "flare_duration": (["survey"] + coord_names, zeros_array.copy()),
+            "flare_prob": (["survey"] + coord_names, zeros_array.copy()),
+            "duty_cycle": (["survey"] + coord_names, zeros_array.copy()),
+            "visit_prob": (["survey"] + coord_names, zeros_array.copy()),
+            "total_prob": (["survey"] + coord_names, zeros_array.copy()),
+            "visit_detections": (["survey"] + coord_names, zeros_array.copy()),
+            "total_detections": (["survey"] + coord_names, zeros_array.copy()),
+            "effective_volume": (["survey"] + coord_names, zeros_array.copy()),
+            "scanned_semimajor_axes": ("semimajor_axis", np.zeros_like(self.semimajor_axes, dtype=bool)),
+        }
+        # add the survey coordinate as well
+        coords["survey"] = survey_names
 
         ds = xr.Dataset(coords=coords, data_vars=data_vars)
 
@@ -747,71 +765,58 @@ class Grid:
         """
         hours, rem = divmod(time_seconds, 3600)
         minutes, seconds = divmod(rem, 60)
-        return f"{int(hours):02d}:{int(minutes):02d}:{seconds:.1f}"
+        return f"{int(hours):02d}:{int(minutes):02d}:{seconds:02.1f}"
 
 
 if __name__ == "__main__":
 
-    if 1:
-        if len(sys.argv) > 1:
-            survey_name = sys.argv[1].upper()
-        else:
-            survey_name = "all_surveys"
-            # survey_name = 'ZTF'
-
-        if len(sys.argv) > 2:
-            lens_type = sys.argv[2]
-        else:
-            lens_type = "BH"
-
-        if lens_type not in ["WD", "BH"]:
-            raise ValueError('Value of "lens_type" must be "WD" or "BH". ' f'Instead got "{lens_type}".')
-
-        if len(sys.argv) > 3:
-            demo_mode = sys.argv[3].upper()
-        else:
-            demo_mode = "DEMO"
-
-        if demo_mode not in ["DEMO", "FULL"]:
-            raise ValueError('Value of "demo_mode" must be "DEMO" or "REAL". ' f'Instead got "{demo_mode}".')
-
-        print(f"Running {demo_mode} simulation for survey: {survey_name}")
-
-        g = Grid(wd_lens=lens_type == "WD")
-        if demo_mode == "DEMO":
-            g.setup_demo_scan(wd_lens=lens_type == "WD")
-
-        if survey_name != "all_surveys":
-            g.surveys = [Survey(survey_name)]
-
-        g.run_simulation(keep_systems=demo_mode == "DEMO")
-
-        ev = g.marginalize_declinations()
-
-        # make a probability distribution that is flat in semimajor axis space
-        prob_flat = g.get_probability_density(lens_temp=-2, star_temp=-2, lens_mass=(0.6, 0.2), star_mass=(0.6, 0.2))
-        g.dataset["probability_density_flat"] = prob_flat
-        prob = g.get_default_probability_density()
-        total_vol = float(g.get_total_volume())
-        print(f"total volume: {total_vol:.1f}pc^3")
-        # g.datset = xr.load_dataset('saved/grid_data.nc')
-        print(g.timing)
-
-        ds = g.dataset
-
-        if demo_mode == "FULL":
-            try:
-                os.mkdir("saved")
-            except FileExistsError:
-                pass
-            g.dataset.to_netcdf(f"saved/simulate_{survey_name}_{lens_type}.nc")
-
+    if len(sys.argv) > 1:
+        survey_name = sys.argv[1].upper()
     else:
-        g = Grid()
-        g.setup_demo_scan(wd_lens=True)
-        g.star_masses = [0.6]
-        print(g.semimajor_axis_distribution())
-        plt.plot(g.semimajor_axes, g.semimajor_axis_distribution())
-        plt.xscale("log")
-        plt.yscale("log")
-        plt.show()
+        survey_name = "all_surveys"
+        # survey_name = 'TESS'
+
+    if len(sys.argv) > 2:
+        lens_type = sys.argv[2]
+    else:
+        lens_type = "BH"
+
+    if lens_type not in ["WD", "BH"]:
+        raise ValueError('Value of "lens_type" must be "WD" or "BH". ' f'Instead got "{lens_type}".')
+
+    if len(sys.argv) > 3:
+        demo_mode = sys.argv[3].upper()
+    else:
+        demo_mode = "DEMO"
+
+    if demo_mode not in ["DEMO", "FULL"]:
+        raise ValueError('Value of "demo_mode" must be "DEMO" or "REAL". ' f'Instead got "{demo_mode}".')
+
+    print(f"Running {demo_mode} simulation for survey: {survey_name}")
+
+    g = Grid(wd_lens=lens_type == "WD")
+    if demo_mode == "DEMO":
+        g.setup_demo_scan(wd_lens=lens_type == "WD")
+
+    if survey_name != "all_surveys":
+        g.surveys = [Survey(survey_name)]
+
+    if demo_mode == "DEMO":
+        filename = None
+        keep = True
+    else:
+        filename = os.path.join(CODE_ROOT, f"saved/simulate_{survey_name}_{lens_type}.nc")
+        keep = False
+
+    g.run_simulation(keep_systems=keep, filename=filename, load_backups=True, backup_interval=100)
+
+    ev = g.marginalize_declinations()
+
+    # make a probability distribution that is flat in semimajor axis space
+    prob_flat = g.get_probability_density(lens_temp=-2, star_temp=-2, lens_mass=(0.6, 0.2), star_mass=(0.6, 0.2))
+    g.dataset["probability_density_flat"] = prob_flat
+    prob = g.get_default_probability_density()
+    total_vol = float(g.get_total_volume())
+    print(f"total volume: {total_vol:.1f}pc^3")
+    # g.datset = xr.load_dataset('saved/grid_data.nc')
+    print(g.timing)
