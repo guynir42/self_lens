@@ -1,5 +1,5 @@
 # project specific stuff
-saved/*
+saved/*.backup
 scripts/*.npz
 scripts/*.txt
 plots/*

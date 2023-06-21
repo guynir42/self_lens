@@ -769,7 +769,23 @@ class Grid:
 
 
 if __name__ == "__main__":
+    """
+    Use this file to run simulations from terminal.
+    The parameters, in order, are:
+    1. survey_name: string, name of the survey to simulate
+       Choose: LSST, ZTF, TESS, DECAM, CURIOS, CURIOS_ARRAY, LAST
+    2. lens_type: string, type of lens to simulate
+       Choose WD or BH to make white dwarf or black hole lenses
+    3. demo_mode: string, whether to run a demo or full simulation.
+       Choose DEMO or FULL
 
+    It is ok to run each survey/lens type separately.
+    It is ok to stop the simulation mid way, since
+    the output is saved to a ".test" file every 1000 systems.
+    Remove that file if you don't want the simulation to start
+    from where it left off.
+
+    """
     if len(sys.argv) > 1:
         survey_name = sys.argv[1].upper()
     else:
