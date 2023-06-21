@@ -1,3 +1,4 @@
 test_dataset.nc filter=lfs diff=lfs merge=lfs -text
 test_grid_scan.nc filter=lfs diff=lfs merge=lfs -text
 test.nc filter=lfs diff=lfs merge=lfs -text
+saved/simulate_TESS_WD.nc filter=lfs diff=lfs merge=lfs -text
