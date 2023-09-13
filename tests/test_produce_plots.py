@@ -1,3 +1,4 @@
+import os
 import pytest
 
 import numpy as np
@@ -12,8 +13,14 @@ from src.grid_scan import Grid
 # ref: https://stackoverflow.com/questions/15713279/calling-pylab-savefig-without-display-in-ipython
 matplotlib.use("Agg")
 
+if not os.path.isdir("plots"):
+    os.mkdir("plots")
+
 
 def test_make_individual_geometries():
+    if not os.path.isdir("plots/individual_geometries"):
+        os.mkdir("plots/individual_geometries")
+
     plt.figure(num=0, figsize=[12, 6])
 
     distances = np.linspace(0, 5, 20)
@@ -22,8 +29,8 @@ def test_make_individual_geometries():
         plt.show()
         plt.pause(0.2)
 
-        plt.savefig(f"individual_geometries/plots/geometry_{i}.pdf")
-        plt.savefig(f"individual_geometries/plots/geometry_{i}.png")
+        plt.savefig(f"plots/individual_geometries/geometry_{i}.pdf")
+        plt.savefig(f"plots/individual_geometries/geometry_{i}.png")
 
 
 def test_make_multiple_geometries():
@@ -387,7 +394,7 @@ def test_make_magnification_vs_period_plot(sim):
 
 
 def test_plot_survey_precisions():
-    import survey
+    from src.survey import Survey
 
     plt.rc("font", size=24)
 
@@ -404,7 +411,7 @@ def test_plot_survey_precisions():
     # fig, axes = plt.subplots(num=5, figsize=[18, 12])
 
     for i, s in enumerate(survey_names):
-        new_survey = survey.Survey(s)
+        new_survey = Survey(s)
         if new_survey.prec_list is not None:
             m = new_survey.mag_list
             p = new_survey.prec_list
