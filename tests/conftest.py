@@ -39,6 +39,50 @@ def grid():
     return g
 
 
+@pytest.fixture(scope="module")
+def wd_ds():
+    survey_names = ["ZTF", "TESS", "LSST", "CURIOS", "CURIOS_ARRAY", "LAST"]
+
+    ds = None
+    for survey in survey_names:
+        filename = os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_WD.nc")
+        new_ds = xr.load_dataset(filename, decode_times=False)
+        for name in ["lens_temp", "star_temp"]:
+            new_ds[name] = np.round(new_ds[name])
+
+        if ds is None:
+            ds = new_ds
+        else:
+            ds = xr.concat([ds, new_ds], dim="survey")
+
+    if ds is None:
+        raise ValueError("No data loaded!")
+
+    return ds
+
+
+@pytest.fixture(scope="module")
+def bh_ds():
+    survey_names = ["ZTF", "TESS", "LSST", "CURIOS", "CURIOS_ARRAY", "LAST"]
+
+    ds = None
+    for survey in survey_names:
+        filename = os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_BH.nc")
+        new_ds = xr.load_dataset(filename, decode_times=False)
+        for name in ["lens_temp", "star_temp"]:
+            new_ds[name] = np.round(new_ds[name])
+
+        if ds is None:
+            ds = new_ds
+        else:
+            ds = xr.concat([ds, new_ds], dim="survey")
+
+    if ds is None:
+        raise ValueError("No data loaded!")
+
+    return ds
+
+
 @pytest.fixture
 def ztf():
     return Survey("ZTF")

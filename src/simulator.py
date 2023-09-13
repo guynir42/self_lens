@@ -550,7 +550,7 @@ class Simulator:
         """
         einstein_km = self.einstein_radius * 700000  # convert solar radii to km
 
-        scale_km = einstein_km / 1.4  # 1.4 is a fudge factor
+        scale_km = einstein_km / 1.0  # 1.4 is a fudge factor
 
         # maximum length scale for lensing is lens+source size (already in einstein units)
         multiplier_star = 1 + self.source_size

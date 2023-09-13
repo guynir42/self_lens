@@ -9,7 +9,9 @@ import scipy
 import pytest
 import matplotlib.pyplot as plt
 
-sys.path.append(path.dirname(path.abspath(__file__)))
+from src.survey import Survey
+
+# sys.path.append(path.dirname(path.abspath(__file__)))
 
 
 def test_back_of_the_envelope(sim, ztf):
@@ -26,7 +28,7 @@ def test_back_of_the_envelope(sim, ztf):
     (best_prob, total_prob) = ztf.visit_prob_all_declinations(sim)
 
     # get a back of the envelope estimate for the total probability
-    total_prob_estimate = sim.visit_prob_all_declinations_estimate()
+    total_prob_estimate = sim.visit_prob_all_declinations_estimate(threshold=ztf.threshold)
 
     print(
         f"max_dec= {sim.declination:.3f} | "
@@ -52,7 +54,7 @@ def test_back_of_the_envelope(sim, ztf):
     (best_prob, total_prob) = ztf.visit_prob_all_declinations(sim)
 
     # get a back of the envelope estimate for the total probability
-    total_prob_estimate = sim.visit_prob_all_declinations_estimate()
+    total_prob_estimate = sim.visit_prob_all_declinations_estimate(threshold=ztf.threshold)
 
     print(
         f"max_dec= {sim.declination:.3f} | "
@@ -74,7 +76,7 @@ def test_back_of_the_envelope(sim, ztf):
     (best_prob, total_prob) = ztf.visit_prob_all_declinations(sim)
 
     # get a back of the envelope estimate for the total probability
-    total_prob_estimate = sim.visit_prob_all_declinations_estimate()
+    total_prob_estimate = sim.visit_prob_all_declinations_estimate(threshold=ztf.threshold)
 
     print(
         f"max_dec= {sim.declination:.3f} | "
@@ -206,6 +208,16 @@ def test_probabilities(sim, ztf):
     assert 1 - sim.syst.visit_prob["ZTF"][0] < 0.2
     # should be able to see multiple flares
     assert sim.syst.visit_detections["ZTF"][0] > 1
+
+
+def test_precision_is_monotonic():
+    for s in ["TESS", "ZTF", "LSST", "DECAM", "CURIOS", "LAST"]:
+        prev_p = 0
+        survey = Survey(s)
+        for p in survey.prec_list:
+            assert p > 0
+            assert p >= prev_p
+            prev_p = p
 
 
 def test_grid_scan(grid):
