@@ -2,6 +2,7 @@ import sys
 import os
 import pytest
 import time
+import requests
 
 import pickle
 import numpy as np
@@ -41,7 +42,29 @@ def grid():
 
 @pytest.fixture(scope="module")
 def wd_ds():
-    survey_names = ["ZTF", "TESS", "LSST", "CURIOS", "CURIOS_ARRAY", "LAST"]
+    """
+    This will lazy-download the big simulation files if they don't exist in "saved"
+    """
+    if not os.path.isdir(os.path.join(ROOT_FOLDER, "saved")):
+        os.mkdir(os.path.join(ROOT_FOLDER, "saved"))
+
+    survey_names = ["ZTF", "TESS", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
+
+    # TODO: replace these with permanent storage on e.g., Zenodo
+    links = {
+        "TESS": "https://www.dropbox.com/s/1oybcd15rsaaaqo/simulate_TESS_WD.nc?dl=1",
+        "ZTF": "https://www.dropbox.com/s/cu0qpy2w7cyvmav/simulate_ZTF_WD.nc?dl=1",
+        "LSST": "https://www.dropbox.com/s/fhmayvx7o2m9ery/simulate_LSST_WD.nc?dl=1",
+        "DECAM": "https://www.dropbox.com/s/wxhm3ogiz91kwjk/simulate_DECAM_WD.nc?dl=1",
+        "CURIOS": "https://www.dropbox.com/s/5dys94f12ud6jhm/simulate_CURIOS_WD.nc?dl=1",
+        "LAST": "https://www.dropbox.com/s/kijsjwgm3rijd1f/simulate_LAST_WD.nc?dl=1",
+    }
+
+    for survey in survey_names:
+        if not os.path.isfile(os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_WD.nc")):
+            print(f"Downloading WD simulation results for {survey}...")
+            r = requests.get(links[survey], allow_redirects=True)
+            open(os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_WD.nc"), "wb").write(r.content)
 
     ds = None
     for survey in survey_names:
