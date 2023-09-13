@@ -217,6 +217,7 @@ def test_make_example_system_wd_bh(sim):
 
 
 def test_make_magnification_vs_period_plot(sim):
+    matplotlib.use("Qt5Agg")
     original_font_size = matplotlib.rcParams["font.size"]
     try:
         matplotlib.rcParams["font.size"] = 22
@@ -225,7 +226,7 @@ def test_make_magnification_vs_period_plot(sim):
         sim.star_temp = 7000
         sim.declination = 0
 
-        fig = plt.figure(num=2, figsize=[18, 10])
+        fig = plt.figure(num=2, figsize=[23, 14])
         plt.clf()
         # ax = fig.add_axes([0.08, 0.08, 0.65, 0.87])
         ax = fig.add_axes([0.08, 0.08, 0.87, 0.87])
@@ -398,7 +399,7 @@ def test_plot_survey_precisions():
 
     plt.rc("font", size=24)
 
-    survey_names = ["TESS", "ZTF", "LSST", "DECAM", "CURIOS", "LAST"]
+    survey_names = ["ZTF", "TESS", "LSST", "DECAM", "CURIOS", "LAST"]
     # markers = ['x', 'v', '*', '^', 's']
     line_styles = ["-", ":", "--", "-."]
     colors = ["k", "r", "g", "b"]
@@ -548,8 +549,8 @@ def test_plot_effective_volume_wd(wd_ds):
     fig.clf()
     fig, axes = plt.subplots(num=11, figsize=[12, 8])
 
-    surveys = ["TESS", "CURIOS", "LSST", "CURIOS_ARRAY"]
-    markers = ["x", "v", "*", "^", "s"]
+    surveys = ["ZTF", "TESS", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
+    markers = ["X", "v", "*", "^", "s", "D", "P"]
     ev = (wd_ds.marginalized_volume * wd_ds.probability_density).sum(
         dim=["lens_mass", "star_mass", "lens_temp", "star_temp"]
     )
@@ -560,9 +561,9 @@ def test_plot_effective_volume_wd(wd_ds):
     for i, s in enumerate(surveys):
         ev_curve[s] = ev.sel(survey=s).values
         min_sma = min(min_sma, sma[np.argmin(ev_curve[s] > 0)])
-        axes.plot(sma, ev_curve[s], label=s, marker=markers[i], linewidth=2.5, markersize=10)
+        axes.plot(sma, ev_curve[s], label=s, marker=markers[i], linewidth=2.0, markersize=8)
 
-    axes.set_ylim((1e-3, 1e6))
+    axes.set_ylim((1e-3, 3e6))
     axes.set_xlim((8e-3, 15))
     axes.set_yscale("log")
     axes.set_xscale("log")
@@ -584,10 +585,11 @@ def test_plot_effective_volume_wd(wd_ds):
     axes.plot(
         sma,
         np.ones(sma.shape) * need_volume,
-        "--",
-        label=f"1 DWD per {int(need_volume)} pc$^3$",
+        "--k",
+        label=f"DWD/{int(need_volume)} pc$^3$",
+        lw=2.5,
     )
-    axes.legend(loc="upper right", fontsize=font_size, framealpha=1)
+    axes.legend(loc="upper right", fontsize=font_size, framealpha=0, ncol=2)
 
     # following https://stackoverflow.com/questions/44078409/matplotlib-semi-log-plot-minor-tick-marks-are-gone-when-range-is-large
     locmaj = matplotlib.ticker.LogLocator(base=10, numticks=12)
@@ -623,8 +625,8 @@ def test_plot_effective_volume_bh(bh_ds):
     fig.clf()
     fig, axes = plt.subplots(num=11, figsize=[12, 8])
 
-    surveys = ["TESS", "CURIOS", "LSST", "CURIOS_ARRAY"]
-    markers = ["x", "v", "*", "^", "s"]
+    surveys = ["TESS", "ZTF", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
+    markers = ["X", "v", "*", "^", "s", "D", "P"]
     ev = (bh_ds.marginalized_volume * bh_ds.probability_density).sum(
         dim=["lens_mass", "star_mass", "lens_temp", "star_temp"]
     )
@@ -635,10 +637,10 @@ def test_plot_effective_volume_bh(bh_ds):
     for i, s in enumerate(surveys):
         ev_curve[s] = ev.sel(survey=s).values
         min_sma = min(min_sma, sma[np.argmin(ev_curve[s] > 0)])
-        axes.plot(sma, ev_curve[s], label=s, marker=markers[i])
+        axes.plot(sma, ev_curve[s], label=s, marker=markers[i], linewidth=2.0, markersize=8)
 
-    axes.set_ylim((1e-7, 1e8))
-    # axes.set_xlim((8e-3, 15))
+    axes.set_ylim((1e-9, 1e8))
+    axes.set_xlim((8e-5, 1.5))
 
     axes.set_yscale("log")
     axes.set_xscale("log")
@@ -697,8 +699,8 @@ def test_plot_effective_volume_bh(bh_ds):
 
     ax3.fill_between(sma, fwhm1, fwhm2, color="k", alpha=0.3)
 
-    axes.fill_between([np.nan, np.nan], [np.nan, np.nan], color="k", alpha=0.3, label="Flare FWHM range")
-    axes.legend(loc="lower right", fontsize=font_size, framealpha=1)
+    axes.fill_between([np.nan, np.nan], [np.nan, np.nan], color="k", alpha=0.3, label="FWHM range")
+    axes.legend(loc="lower right", fontsize=font_size, framealpha=0, ncols=2)
 
     plt.show()
 
