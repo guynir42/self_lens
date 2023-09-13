@@ -871,25 +871,26 @@ def setup_default_survey(name, kwargs):
     # curios_exp_time = 30  # adjust from the above table using sqrt(t) scaling
     # curios_rms = curios_rms / np.sqrt(curios_exp_time / curios_chosen_exp_time)
 
-    noise_model = NoiseModel(
-        background=0.2,
-        dark_current=0,
-        read_noise=1,
-        fractional_error=0.01,
-        num_pixels=1,
-        aperture=3.14 * (15 / 2) ** 2,
-        exposure_time=30,
-        quantum_efficiency=0.6,
-        transmission=0.5,
-        lower_wavelength=550,
-        upper_wavelength=700,
-        limiting_mag=17.3,
-        sigmas_lim=10,
-    )
-
+    # noise_model = NoiseModel(
+    #     background=0.2,
+    #     dark_current=0,
+    #     read_noise=1,
+    #     fractional_error=0.01,
+    #     num_pixels=1,
+    #     aperture=3.14 * (15 / 2) ** 2,
+    #     exposure_time=30,
+    #     quantum_efficiency=0.6,
+    #     transmission=0.5,
+    #     lower_wavelength=550,
+    #     upper_wavelength=700,
+    #     limiting_mag=17.3,
+    #     sigmas_lim=10,
+    # )
+    #
     # curios_mag = np.arange(10.0, 20.0, 0.5)
     # curios_rms = noise_model.calc_using_background(np.array(curios_mag))
 
+    # from Hanna's dataset:
     curios_mag, curios_snr = np.loadtxt(os.path.join(ROOT_FOLDER, "data/CuRIOS_SNR_v_mag_30sec.txt"), unpack=True)
     curios_rms = 1 / curios_snr
 
@@ -985,8 +986,8 @@ def setup_default_survey(name, kwargs):
     }
 
     defaults = dict(
-        TESS=tess_dict,
         ZTF=ztf_dict,
+        TESS=tess_dict,
         LSST=lsst_dict,
         DECAM=decam_dict,
         CURIOS=curios_dict,
