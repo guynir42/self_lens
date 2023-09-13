@@ -32,7 +32,7 @@ PyWavelets==1.4.1
 PyYAML==6.0
 requests==2.31.0
 scikit-image==0.20.0
-scipy==1.9.1
+scipy==1.10.0
 six==1.16.0
 tifffile==2023.3.21
 tomli==2.0.1
