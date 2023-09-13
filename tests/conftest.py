@@ -87,7 +87,7 @@ def wd_ds():
 
 @pytest.fixture(scope="module")
 def bh_ds():
-    survey_names = ["ZTF", "TESS", "LSST", "CURIOS", "CURIOS_ARRAY", "LAST"]
+    survey_names = ["ZTF", "TESS", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
     # TODO: replace these with permanent storage on e.g., Zenodo
     links = {
         "ZTF": "https://www.dropbox.com/scl/fi/jzzwuub7925veavn777q3/simulate_ZTF_BH.nc?rlkey=c1ys6cq9vuj2q4m6y8jqo3jps&dl=1",
