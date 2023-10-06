@@ -217,7 +217,6 @@ def test_make_example_system_wd_bh(sim):
 
 
 def test_make_magnification_vs_period_plot(sim):
-    matplotlib.use("Qt5Agg")
     original_font_size = matplotlib.rcParams["font.size"]
     try:
         matplotlib.rcParams["font.size"] = 22
@@ -614,12 +613,13 @@ def test_plot_effective_volume_bh(bh_ds):
     g = Grid()
     g.dataset = bh_ds
     g.marginalize_declinations()
-    prob_flat = g.get_probability_density(lens_temp=-2, star_temp=-2, lens_mass=(0.6, 0.2), star_mass=(0.6, 0.2))
+    prob_flat = g.get_probability_density(lens_temp=-2, star_temp=-2, lens_mass=-2, star_mass=(0.6, 0.2))
     g.dataset["probability_density_flat"] = prob_flat
 
-    prob = g.get_default_probability_density()
-    total_vol = float(g.get_total_volume())
-    print(f"total volume: {total_vol:.1f}pc^3")
+    # prob = g.get_default_probability_density()
+    # print(bh_ds.probability_density)
+    # total_vol = float(g.get_total_volume())
+    # print(f"total volume: {total_vol:.1f}pc^3")
 
     fig, axes = plt.subplots(num=11, figsize=[12, 8])
     fig.clf()
@@ -627,7 +627,7 @@ def test_plot_effective_volume_bh(bh_ds):
 
     surveys = ["TESS", "ZTF", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
     markers = ["X", "v", "*", "^", "s", "D", "P"]
-    ev = (bh_ds.marginalized_volume * bh_ds.probability_density).sum(
+    ev = (bh_ds.marginalized_volume * bh_ds.probability_density_flat).sum(
         dim=["lens_mass", "star_mass", "lens_temp", "star_temp"]
     )
     sma = ev.semimajor_axis.values
@@ -639,7 +639,7 @@ def test_plot_effective_volume_bh(bh_ds):
         min_sma = min(min_sma, sma[np.argmin(ev_curve[s] > 0)])
         axes.plot(sma, ev_curve[s], label=s, marker=markers[i], linewidth=2.0, markersize=8)
 
-    axes.set_ylim((1e-9, 1e8))
+    axes.set_ylim((1e-6, 1e8))
     axes.set_xlim((8e-5, 1.5))
 
     axes.set_yscale("log")
