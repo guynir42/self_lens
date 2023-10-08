@@ -838,6 +838,7 @@ def setup_default_survey(name, kwargs):
         "threshold": 5,
         "noise_model": noise_model,
     }
+    # TODO: need to correct for the duty cycle, duration (which is 2yr instead of 5yr)
 
     ##### CURIOS #####
 
