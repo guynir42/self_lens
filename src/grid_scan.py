@@ -632,7 +632,7 @@ class Grid:
         ----------
         alpha: scalar float
             The power law index of the zero age, semimajor axis power law index
-            for binary white dwarfs that emerge from the comme envelope phase.
+            for binary white dwarfs that emerge from the common envelope phase.
 
         sma: array-like
             The semimajor axis values to evaluate the distribution at.
@@ -721,7 +721,7 @@ class Grid:
         """
         Calculate the total number of detections expected,
         given a set of prior probabilities or number of systems
-        with the given prameters.
+        with the given parameters.
 
         Parameters
         ----------
@@ -757,6 +757,7 @@ class Grid:
             for total_detections and total_volume.
             Need to think about this...
         """
+        raise NotImplementedError("Not yet implemented!")
 
     @staticmethod
     def human_readable_time(time_seconds):
