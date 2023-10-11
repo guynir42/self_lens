@@ -312,13 +312,6 @@ class Grid:
     def make_xarray(self):
         """
         Set up an xarray holding the simulation results.
-
-        Parameters
-        ----------
-        coords: dict
-            Coordinates dictionary
-        data_vars: dict
-            Data variables dictionary
         """
         coords = {
             "lens_temp": self.lens_temperatures,

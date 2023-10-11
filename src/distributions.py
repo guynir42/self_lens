@@ -74,6 +74,7 @@ def get_prob_dataset(da, obj="WD", temp_index="mid", mass_index="mid", sma_index
     prob_da: xarray DataArray
         A new data array with the normalized probability distribution.
     """
+    obj = obj.upper()
     if obj not in ["WD", "BH"]:
         raise ValueError('obj must be "WD" or "BH"')
 
@@ -111,12 +112,12 @@ def get_prob_dataset(da, obj="WD", temp_index="mid", mass_index="mid", sma_index
     )
 
     # the probability distribution calculation:
-    get_probability(prob_da, obj=obj, temp_index=temp_index, mass_index=mass_index, sma_index=sma_index)
+    calc_probability(prob_da, obj=obj, temp_index=temp_index, mass_index=mass_index, sma_index=sma_index)
 
     return prob_da
 
 
-def get_probability(da, obj="WD", temp_index="mid", mass_index="mid", sma_index="mid"):
+def calc_probability(da, obj="WD", temp_index="mid", mass_index="mid", sma_index="mid"):
     """
     Use the parameters in reference Maoz et al 2018
     (https://ui.adsabs.harvard.edu/abs/2018MNRAS.476.2584M/abstract)
@@ -149,6 +150,7 @@ def get_probability(da, obj="WD", temp_index="mid", mass_index="mid", sma_index=
         The semimajor axis model to use. Can be "low", "mid" or "high" or a float
         value for the semimajor axis power law index.
     """
+    obj = obj.upper()
     if obj not in ["WD", "BH"]:
         raise ValueError('obj must be "WD" or "BH"')
 
@@ -285,7 +287,7 @@ def semimajor_axis_distribution(sma, star_masses, lens_masses, alpha=-1.3):
         return -(x ** (4 + alpha)) * ((1 + x ** (-4)) ** ((alpha + 1) / 4) - 1)
 
 
-def marginalize_mass_temp(ev, prob, use_loop=True):
+def marginalize_mass_temp(ev, prob):
     """
     Marginalize over lens and star temperatures and masses.
     Returns a new dataset that holds the effective volume in one
@@ -299,8 +301,6 @@ def marginalize_mass_temp(ev, prob, use_loop=True):
     However, because these arrays are very large, we will
     do this in each individual semimajor axis step separately,
     and do the sum over the interpolated product in a loop.
-    To skip the loop set use_loop=False, but be careful as that
-    can easily blow up the RAM.
 
     To calculate the total number of detections, multiply ev * prob
     and integrate over semimajor axis (including the variable step size dsma).
@@ -314,10 +314,6 @@ def marginalize_mass_temp(ev, prob, use_loop=True):
     prob: xarray DataArray
         The probability distribution, on a fine grid over lens/star mass/temperature
         and semimajor axis.
-    use_loop: bool
-        Whether to use a loop to calculate the weighted average.
-        This is slower but uses less RAM.
-        Default is True.
 
     Returns
     -------
@@ -329,33 +325,217 @@ def marginalize_mass_temp(ev, prob, use_loop=True):
     if not np.array_equal(sma, ev.semimajor_axis.values):
         raise ValueError("Expected semimajor axis coordinates to be the same on ev and prob! ")
 
-    if use_loop is False:
-        new_ev = ev.interp_like(prob, method="cubic") * prob
-        new_ev = new_ev.sum(["lens_mass", "star_mass", "lens_temp", "star_temp"])
+    ev_per_sma = np.zeros(len(sma), dtype=float)
+    prob_per_sma = np.zeros(len(sma), dtype=float)
+    for i, a in enumerate(sma):
+        prob_sma = prob.isel(semimajor_axis=i)  # the probability distribution for this semimajor axis value
+        new_ev = ev.isel(semimajor_axis=i)  # the effective volume for this semimajor axis value
+        if len(ev.lens_temp) == 1:
+            new_ev = new_ev.isel(lens_temp=0)
+            prob_sma = prob_sma.isel(lens_temp=0)
+        new_ev = new_ev.interp_like(prob_sma, method="cubic")
+        new_ev = new_ev.where(new_ev > 0, 0)  # remove negative values (that could arise from interpolation)
+        if len(ev.lens_temp) == 1:
+            coords = ["star_temp", "lens_mass", "star_mass"]
+        else:
+            coords = ["lens_temp", "star_temp", "lens_mass", "star_mass"]
+        prob_per_sma[i] = prob_sma.sum(coords)
+        ev_per_sma[i] = (new_ev * prob_sma).sum(coords) / prob_per_sma[i]
 
-    else:  # the default uses a loop to avoid memory overflow
-        ev_per_sma = np.zeros(len(sma), dtype=float)
-        prob_per_sma = np.zeros(len(sma), dtype=float)
-        for i, a in enumerate(sma):
-            prob_sma = prob.isel(semimajor_axis=i)  # the probability distribution for this semimajor axis value
-            new_ev = ev.isel(semimajor_axis=i)  # the effective volume for this semimajor axis value
-            if len(ev.lens_temp) == 1:
-                new_ev = new_ev.isel(lens_temp=0)
-                prob_sma = prob_sma.isel(lens_temp=0)
-            new_ev = new_ev.interp_like(prob_sma, method="cubic")
-            if len(ev.lens_temp) == 1:
-                coords = ["star_temp", "lens_mass", "star_mass"]
-            else:
-                coords = ["lens_temp", "star_temp", "lens_mass", "star_mass"]
-            prob_per_sma[i] = prob_sma.sum(coords)
-            ev_per_sma[i] = (new_ev * prob_sma).sum(coords) / prob_per_sma[i]
-
-        new_ev = xr.DataArray(data=ev_per_sma, coords={"semimajor_axis": sma})
-        new_prob = xr.DataArray(data=prob_per_sma, coords={"semimajor_axis": sma})
+    new_ev = xr.DataArray(data=ev_per_sma, coords={"semimajor_axis": sma})
+    new_prob = xr.DataArray(data=prob_per_sma, coords={"semimajor_axis": sma})
 
     ds = xr.Dataset(data_vars={"effective_volume": new_ev, "probability": new_prob})
+    ds.effective_volume.attrs["name"] = "effective_volume"
+    ds.effective_volume.attrs["long_name"] = "Effective volume"
+    ds.effective_volume.attrs["units"] = "pc^3"
+    ds.semimajor_axis.attrs["name"] = "semimajor_axis"
+    ds.semimajor_axis.attrs["long_name"] = "Semimajor axis"
+    ds.semimajor_axis.attrs["units"] = "AU"
 
     return ds
+
+
+def density_model(ds, space_density_pc3=1 / 1000):
+    """
+    Calculate a density model (how many systems per pc^3
+    in each semimajor axis bin, and the reciprocal of
+    how many pc3 are required to find one system).
+    This is added to the dataset as the two new variables
+    "density" and "pc3_per_system".
+    Also adds the number of detections in each bin into
+    the dataset as "detections".
+
+    This modifies the "ds" parameter in place and returns nothing.
+
+    Parameters
+    ----------
+    ds: xarray Dataset
+        The dataset with the effective volume and probability distribution,
+        as a function of semimajor axis only. This is the output of
+        marginalize_mass_temp.
+    space_density_pc3: float
+        The space density of the objects in pc^-3.
+        Default is 1/1000.
+
+    """
+    ds["density"] = ds.probability * space_density_pc3
+    ds["pc3_per_system"] = 1 / ds.density
+    ds["detections"] = ds.effective_volume * ds.density
+    ds["detections_followup"] = ds.effective_volume_followup * ds.density
+
+    ds.density.attrs["name"] = "density"
+    ds.density.attrs["long_name"] = "Density"
+    ds.density.attrs["units"] = "pc^-3"
+
+    ds.pc3_per_system.attrs["name"] = "pc3_per_system"
+    ds.pc3_per_system.attrs["long_name"] = "Average volume per system"
+    ds.pc3_per_system.attrs["units"] = "pc^3"
+
+    ds.detections.attrs["name"] = "detections"
+    ds.detections.attrs["long_name"] = "Detections"
+
+    ds.detections_followup.attrs["name"] = "detections_followup"
+    ds.detections_followup.attrs["long_name"] = "Detections with followup"
+
+
+def add_followup_prob(ds, frac=0.25, years=5):
+    """
+    Add the probability that a followup campaign would successfully
+    identify repeat occurrences of the system's flare in X years
+    of followup time.
+
+    The result is added as an additional data var to ds in place.
+
+    Parameters
+    ----------
+    ds: xarray Dataset
+        The dataset with the effective volume, the duty cycle and period.
+    frac: float
+        Fraction of the time that a telescope is observing the source.
+        Default is 0.25 which represents a single telescope observing
+        the target for an average of 6 hours each night.
+    years: float
+        The number of years of followup time to consider.
+        The default is 5 years (which is approximately one grad-length).
+
+    """
+    # how many times do we stand to see the flare in X years?
+    number = np.round(years / (ds.orbital_period / 24 / 365.25))
+
+    # probability to see the second flare during followup:
+    prob = 1 - (1 - frac) ** number
+
+    ds["followup_prob"] = prob
+    ds["effective_volume"] = ds["effective_volume"] * prob
+
+
+def fetch_distributions(
+    survey,
+    obj="WD",
+    temp_index="mid",
+    mass_index="mid",
+    sma_index="mid",
+    space_density_pc3=1 / 1000,
+    clear_cache=False,
+):
+    """
+    Run all the above functions, starting from loading the raw dataset
+    from file and down to calculating the semimajor axis based
+    distributions for effective volume, probability, density, and so on.
+
+    Parameters
+    ----------
+    survey: str
+        The survey to get the distributions for.
+        Can be "TESS", "ZTF", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY" or "LAST".
+    obj: str
+        The type of object to get the probability distribution for.
+        Can be "WD" for white dwarfs or "BH" for black holes and neutron stars.
+    temp_index: str or float
+        The temperature model to use. Can be "low", "mid" or "high" or a float
+        value for the temperature power law index.
+    mass_index: str or float or tuple of floats
+        The mass model to use. Can be "low", "mid" or "high" or a float value
+        for the mass power law index, or a tuple of floats for a Gaussian
+        distribution with given mean and standard deviation (in solar mass).
+        This is only for the lens mass, and mostly relevant for the NS/BH case.
+    sma_index: str or float
+        The semimajor axis model to use. Can be "low", "mid" or "high" or a float
+        value for the semimajor axis power law index.
+        This is the power law index of the separation when leaving the common envelope
+        stage, with evolution given by gravitational radiation,
+        see reference in Maoz et al 2018
+        (https://ui.adsabs.harvard.edu/abs/2018MNRAS.476.2584M/abstract)
+    space_density_pc3: float
+        The space density of the objects in pc^-3.
+        Default is 1/1000.
+    clear_cache: bool
+        Wether to clear the results from previous calculations.
+        Default is False, use the cached results.
+        We cache the marginalize_mass_temp() results in the "saved" folder
+        in files that correspond to all the mass/temp/sma indices and object type.
+
+    Returns
+    -------
+    out_ds: xarray Dataset
+        The dataset with the effective volume and probability distribution,
+        as a function of semimajor axis only. Also adds the density of systems,
+        the number of pc^3 required to find one system, and the number of detections.
+    """
+    obj = obj.upper()
+    if obj not in ["WD", "BH"]:
+        raise ValueError('obj must be "WD" or "BH"')
+
+    survey = survey.upper()
+    if survey not in ["TESS", "ZTF", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]:
+        raise ValueError('survey must be "TESS", "ZTF", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY" or "LAST"')
+
+    # get the raw data from file
+    filename = os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_{obj}.nc")
+    if not os.path.isfile(filename):
+        raise FileNotFoundError(f"Cannot find file {filename}. Try using utils.fetch_volumes first!")
+
+    ds = xr.load_dataset(filename, decode_times=False)
+
+    # try to load the cached value:
+    cache_filename = f"saved/marginalized_{survey}_{obj}_{temp_index}_{mass_index}_{sma_index}.nc"
+    cache_filename = os.path.join(ROOT_FOLDER, cache_filename)
+    if clear_cache or not os.path.isfile(cache_filename):
+        # if clear_cache:
+        #     print(f'Not allowed to use cache, recaclulating {cache_filename}')
+        # if not os.path.isfile(cache_filename):
+        #     print(f'No cache file {cache_filename}, calculating new values')
+
+        # cannot (or not allowed to use) the cached value, so calculate it:
+        da = marginalize_declinations(ds)
+        prob = get_prob_dataset(da, obj=obj, temp_index=temp_index, mass_index=mass_index, sma_index=sma_index)
+        ds_sma = marginalize_mass_temp(da, prob)
+
+        add_followup_prob(ds)  # this will reduce the effective volume with the followup probability
+        prob2 = get_prob_dataset(da, obj=obj, temp_index=temp_index, mass_index=mass_index, sma_index=sma_index)
+        ds_sma2 = marginalize_mass_temp(da, prob2)
+
+        # add the effective volume weighted by followup probability to the dataset
+        ds_sma["effective_volume_followup"] = ds_sma2["effective_volume"]
+
+        density_model(ds_sma, space_density_pc3=space_density_pc3)
+
+        # save the result:
+        ds_sma.to_netcdf(cache_filename)
+
+    else:  # can just load the cached value
+        # print(f'loading cached {cache_filename}')
+        ds_sma = xr.load_dataset(cache_filename, decode_times=False)
+
+        # rescale to the new space density:
+        old_density = float(ds_sma.density.sum())
+        rescale = space_density_pc3 / old_density
+        ds_sma["density"] *= rescale
+        ds_sma["pc3_per_system"] /= rescale
+        ds_sma["detections"] *= rescale
+
+    return ds_sma
 
 
 if __name__ == "__main__":
@@ -365,10 +545,26 @@ if __name__ == "__main__":
     ds_wd = xr.load_dataset(filename, decode_times=False)
     da_wd = marginalize_declinations(ds_wd)
     prob_wd = get_prob_dataset(da_wd, obj="WD")
-    # ds_sma_wd = marginalize_mass_temp(da_wd, prob_wd, use_loop=True)
+    ds_sma_wd = marginalize_mass_temp(da_wd, prob_wd)
+
+    add_followup_prob(ds_wd)  # this will reduce the effective volume with the followup probability
+    prob2 = get_prob_dataset(da_wd, obj="WD")
+    ds_sma_wd2 = marginalize_mass_temp(da_wd, prob2)
+
+    # add the effective volume weighted by followup probability to the dataset
+    ds_sma_wd["effective_volume_followup"] = ds_sma_wd2["effective_volume"]
+    density_model(ds_sma_wd)
 
     filename = os.path.join(ROOT_FOLDER, f"saved/simulate_LSST_BH.nc")
     ds_bh = xr.load_dataset(filename, decode_times=False)
     da_bh = marginalize_declinations(ds_bh)
     prob_bh = get_prob_dataset(da_bh, obj="BH", mass_index="mid")
-    ds_sma_bh = marginalize_mass_temp(da_bh, prob_bh, use_loop=True)
+    ds_sma_bh = marginalize_mass_temp(da_bh, prob_bh)
+
+    add_followup_prob(ds_bh)  # this will reduce the effective volume with the followup probability
+    prob2 = get_prob_dataset(da_bh, obj="BH", mass_index="mid")
+    ds_sma_bh2 = marginalize_mass_temp(da_bh, prob2)
+
+    # add the effective volume weighted by followup probability to the dataset
+    ds_sma_bh["effective_volume_followup"] = ds_sma_bh2["effective_volume"]
+    density_model(ds_sma_bh)

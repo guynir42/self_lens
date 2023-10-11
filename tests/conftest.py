@@ -14,7 +14,7 @@ from src.transfer_matrix import TransferMatrix
 from src.grid_scan import Grid
 from src.simulator import Simulator
 from src.survey import Survey
-
+from src.utils import fetch_volumes
 
 ROOT_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -45,29 +45,31 @@ def wd_ds():
     """
     This will lazy-download the big simulation files if they don't exist in "saved"
     """
-    if not os.path.isdir(os.path.join(ROOT_FOLDER, "saved")):
-        os.mkdir(os.path.join(ROOT_FOLDER, "saved"))
-
-    survey_names = ["ZTF", "TESS", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
-
+    # if not os.path.isdir(os.path.join(ROOT_FOLDER, "saved")):
+    #     os.mkdir(os.path.join(ROOT_FOLDER, "saved"))
+    #
     # TODO: replace these with permanent storage on e.g., Zenodo
-    links = {
-        "ZTF": "https://www.dropbox.com/s/cu0qpy2w7cyvmav/simulate_ZTF_WD.nc?dl=1",
-        "TESS": "https://www.dropbox.com/s/1oybcd15rsaaaqo/simulate_TESS_WD.nc?dl=1",
-        "LSST": "https://www.dropbox.com/s/fhmayvx7o2m9ery/simulate_LSST_WD.nc?dl=1",
-        "DECAM": "https://www.dropbox.com/s/wxhm3ogiz91kwjk/simulate_DECAM_WD.nc?dl=1",
-        "CURIOS": "https://www.dropbox.com/s/5dys94f12ud6jhm/simulate_CURIOS_WD.nc?dl=1",
-        "CURIOS_ARRAY": "https://www.dropbox.com/scl/fi/kyfowkp8w01r7jgdcec5e/simulate_CURIOS_ARRAY_WD.nc?rlkey=p1k1a2pmv09gmd60f1ytexq0f&dl=1",
-        "LAST": "https://www.dropbox.com/s/kijsjwgm3rijd1f/simulate_LAST_WD.nc?dl=1",
-    }
+    # links = {
+    #     "ZTF": "https://www.dropbox.com/s/cu0qpy2w7cyvmav/simulate_ZTF_WD.nc?dl=1",
+    #     "TESS": "https://www.dropbox.com/s/1oybcd15rsaaaqo/simulate_TESS_WD.nc?dl=1",
+    #     "LSST": "https://www.dropbox.com/s/fhmayvx7o2m9ery/simulate_LSST_WD.nc?dl=1",
+    #     "DECAM": "https://www.dropbox.com/s/wxhm3ogiz91kwjk/simulate_DECAM_WD.nc?dl=1",
+    #     "CURIOS": "https://www.dropbox.com/s/5dys94f12ud6jhm/simulate_CURIOS_WD.nc?dl=1",
+    #     "CURIOS_ARRAY": "https://www.dropbox.com/scl/fi/kyfowkp8w01r7jgdcec5e/simulate_CURIOS_ARRAY_WD.nc?rlkey=p1k1a2pmv09gmd60f1ytexq0f&dl=1",
+    #     "LAST": "https://www.dropbox.com/s/kijsjwgm3rijd1f/simulate_LAST_WD.nc?dl=1",
+    # }
+    #
+    # for survey in survey_names:
+    #     if not os.path.isfile(os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_WD.nc")):
+    #         print(f"Downloading WD simulation results for {survey}...")
+    #         r = requests.get(links[survey], allow_redirects=True)
+    #         open(os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_WD.nc"), "wb").write(r.content)
 
-    for survey in survey_names:
-        if not os.path.isfile(os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_WD.nc")):
-            print(f"Downloading WD simulation results for {survey}...")
-            r = requests.get(links[survey], allow_redirects=True)
-            open(os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_WD.nc"), "wb").write(r.content)
+    fetch_volumes(obj="WD")  # get the datasets from dropbox, or from Zenodo, if they are not on disk already
 
     ds = None
+    survey_names = ["ZTF", "TESS", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
+
     for survey in survey_names:
         filename = os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_WD.nc")
         new_ds = xr.load_dataset(filename, decode_times=False)
@@ -87,25 +89,28 @@ def wd_ds():
 
 @pytest.fixture(scope="module")
 def bh_ds():
-    survey_names = ["ZTF", "TESS", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
-    # TODO: replace these with permanent storage on e.g., Zenodo
-    links = {
-        "ZTF": "https://www.dropbox.com/scl/fi/jzzwuub7925veavn777q3/simulate_ZTF_BH.nc?rlkey=c1ys6cq9vuj2q4m6y8jqo3jps&dl=1",
-        "TESS": "https://www.dropbox.com/scl/fi/91wbqzlcq498486l8dcy5/simulate_TESS_BH.nc?rlkey=921lpijdhncn9ryr0ot1nw6qs&dl=1",
-        "LSST": "https://www.dropbox.com/scl/fi/50g806rerxrawqgfv5ac6/simulate_LSST_BH.nc?rlkey=rbxeu7oummqe1g5dkvgpb87y9&dl=1",
-        "DECAM": "https://www.dropbox.com/scl/fi/mvbcb7i361o2gqkbh5z44/simulate_DECAM_BH.nc?rlkey=npanms5tly3gqbeevtkurx9ep&dl=1",
-        "CURIOS": "https://www.dropbox.com/scl/fi/f97fgm6b20wajnlk8znsi/simulate_CURIOS_BH.nc?rlkey=1stl4ox794n1kktb7o7807myw&dl=1",
-        "CURIOS_ARRAY": "https://www.dropbox.com/scl/fi/jxzvvha1t0tezvoyy0ri1/simulate_CURIOS_ARRAY_BH.nc?rlkey=aa2tw4lhkxntg6z3mjy0dtjgl&dl=1",
-        "LAST": "https://www.dropbox.com/scl/fi/2idhlgxcv1o47twryme95/simulate_LAST_BH.nc?rlkey=qlhgzxubiiq5y4xrnk8epm0ai&dl=1",
-    }
 
-    for survey in survey_names:
-        if not os.path.isfile(os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_BH.nc")):
-            print(f"Downloading BH simulation results for {survey}...")
-            r = requests.get(links[survey], allow_redirects=True)
-            open(os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_BH.nc"), "wb").write(r.content)
+    # TODO: replace these with permanent storage on e.g., Zenodo
+    # links = {
+    #     "ZTF": "https://www.dropbox.com/scl/fi/jzzwuub7925veavn777q3/simulate_ZTF_BH.nc?rlkey=c1ys6cq9vuj2q4m6y8jqo3jps&dl=1",
+    #     "TESS": "https://www.dropbox.com/scl/fi/91wbqzlcq498486l8dcy5/simulate_TESS_BH.nc?rlkey=921lpijdhncn9ryr0ot1nw6qs&dl=1",
+    #     "LSST": "https://www.dropbox.com/scl/fi/50g806rerxrawqgfv5ac6/simulate_LSST_BH.nc?rlkey=rbxeu7oummqe1g5dkvgpb87y9&dl=1",
+    #     "DECAM": "https://www.dropbox.com/scl/fi/mvbcb7i361o2gqkbh5z44/simulate_DECAM_BH.nc?rlkey=npanms5tly3gqbeevtkurx9ep&dl=1",
+    #     "CURIOS": "https://www.dropbox.com/scl/fi/f97fgm6b20wajnlk8znsi/simulate_CURIOS_BH.nc?rlkey=1stl4ox794n1kktb7o7807myw&dl=1",
+    #     "CURIOS_ARRAY": "https://www.dropbox.com/scl/fi/jxzvvha1t0tezvoyy0ri1/simulate_CURIOS_ARRAY_BH.nc?rlkey=aa2tw4lhkxntg6z3mjy0dtjgl&dl=1",
+    #     "LAST": "https://www.dropbox.com/scl/fi/2idhlgxcv1o47twryme95/simulate_LAST_BH.nc?rlkey=qlhgzxubiiq5y4xrnk8epm0ai&dl=1",
+    # }
+    #
+    # for survey in survey_names:
+    #     if not os.path.isfile(os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_BH.nc")):
+    #         print(f"Downloading BH simulation results for {survey}...")
+    #         r = requests.get(links[survey], allow_redirects=True)
+    #         open(os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_BH.nc"), "wb").write(r.content)
+
+    fetch_volumes(obj="BH")  # get the datasets from dropbox, or from Zenodo, if they are not on disk already
 
     ds = None
+    survey_names = ["ZTF", "TESS", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
     for survey in survey_names:
         filename = os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_BH.nc")
         new_ds = xr.load_dataset(filename, decode_times=False)
