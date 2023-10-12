@@ -16,10 +16,11 @@ ROOT_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 ########################### start the script ###########################
 
-CLEAR_CACHE = True
+CLEAR_CACHE = False
+INCLUDE_FOLLOWUP = False
 
 survey_names = ["TESS", "ZTF", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
-survey_names = ["ZTF"]  # debug only!
+# survey_names = ["ZTF"]  # debug only!
 
 n_wd = []  # number of detections for WDs
 nf_wd = []  # number of detections with followup for WDs
@@ -43,7 +44,7 @@ for idx in indices:
 
     for survey in survey_names:
         ds = fetch_distributions(
-            survey=survey, obj="BH", space_density_pc3=1 / 10000, mass_index=idx, clear_cache=CLEAR_CACHE
+            survey=survey, obj="BH", space_density_pc3=10**-5, mass_index=idx, clear_cache=CLEAR_CACHE
         )
         n_bh[-1].append(float(ds.detections.sum()))
         nf_bh[-1].append(float(ds.detections_followup.sum()))
@@ -51,13 +52,16 @@ for idx in indices:
 # print the results in a latex table format:
 for i, survey in enumerate(survey_names):
     s = survey.replace("_", "\\_")
-    print(
-        f"{s} & {n_wd[i]:.1f} ({nf_wd[i]:.1f}) & "
-        f"{n_bh[0][i]:.1f} ({nf_bh[0][i]:.1f}) & "
-        f"{n_bh[1][i]:.1f} ({nf_bh[0][i]:.1f}) & "
-        f"{n_bh[2][i]:.1f} ({nf_bh[0][i]:.1f}) ",
-        end="",
-    )
+    if INCLUDE_FOLLOWUP:
+        print(
+            f"{s} & {n_wd[i]:.1f} ({nf_wd[i]:.1f}) & "
+            f"{n_bh[0][i]:.1f} ({nf_bh[0][i]:.1f}) & "
+            f"{n_bh[1][i]:.1f} ({nf_bh[1][i]:.1f}) & "
+            f"{n_bh[2][i]:.1f} ({nf_bh[2][i]:.1f}) ",
+            end="",
+        )
+    else:
+        print(f"{s} & {n_wd[i]:.1f} & {n_bh[0][i]:.1f} & {n_bh[1][i]:.1f} & {n_bh[2][i]:.1f} ", end="")
     if i < len(survey_names) - 1:
         print(" \\\\")
     else:

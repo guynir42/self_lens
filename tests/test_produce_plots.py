@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 from src.transfer_matrix import single_geometry, radial_lightcurve
 from src.simulator import Simulator
 from src.grid_scan import Grid
+from src.distributions import fetch_distributions, semimajor_axis_distribution
+
 
 # ref: https://stackoverflow.com/questions/15713279/calling-pylab-savefig-without-display-in-ipython
 matplotlib.use("Agg")
@@ -464,6 +466,120 @@ def test_make_duration_declination_plots(wd_ds):
     plt.savefig("plots/duration_vs_declination.png")
 
 
+def test_plot_effective_volume_wd():
+    import matplotlib
+
+    font_size = 20
+    matplotlib.rcParams.update({"font.size": font_size})
+
+    fig, axes = plt.subplots(num=11, figsize=[12, 8])
+    fig.clf()
+    fig, axes = plt.subplots(num=11, figsize=[12, 8])
+
+    surveys = ["TESS", "ZTF", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
+    # surveys = surveys[:2]  # debug only
+    markers = ["X", "v", "*", "^", "s", "D", "P"]
+
+    for i, s in enumerate(surveys):
+        ds = fetch_distributions(s, obj="WD", space_density_pc3=1 / 1818, verbose=False)
+        sma = ds.semimajor_axis.values
+        ev = ds.effective_volume.values
+        p = axes.plot(sma[::2], ev[::2], label=s, linestyle=None, marker=markers[i], linewidth=0, markersize=8)
+        axes.plot(sma, ev, "-", linewidth=2.0, color=p[0].get_color())
+
+    # axes.set_ylim((1e-3, 3e6))
+    # axes.set_xlim((8e-3, 15))
+    axes.set_yscale("log")
+    axes.set_xscale("log")
+
+    axes.set_xlabel("Semimajor axis [AU]", fontsize=font_size)
+    axes.set_ylabel("Effective volume [pc$^3$]", fontsize=font_size)
+
+    # Kepler's law using two equal 0.6 solar mass WDs
+    period = lambda x: x ** (3 / 2) * 365.25 / np.sqrt(1.2)
+    ax2 = axes.twiny()
+    ax2.set_xlabel("Period [days]", fontsize=font_size)
+    ax2.set_xlim([period(x) for x in axes.get_xlim()])
+    ax2.set_xscale("log")
+
+    # add the model density
+    axes.plot(sma, ds.pc3_per_system, "--k", label="WD-WD density", lw=2.5)
+
+    lgnd = axes.legend(loc="lower center", fontsize=font_size, framealpha=0, ncol=2)
+    for lh in lgnd.legendHandles:
+        lh.set_markersize(12.0)
+        lh.set_linewidth(2.0)
+
+    # following https://stackoverflow.com/questions/44078409/matplotlib-semi-log-plot-minor-tick-marks-are-gone-when-range-is-large
+    locmaj = matplotlib.ticker.LogLocator(base=10, numticks=12)
+    axes.yaxis.set_major_locator(locmaj)
+    locmin = matplotlib.ticker.LogLocator(base=10.0, subs=(0.2, 0.4, 0.6, 0.8), numticks=12)
+    axes.yaxis.set_minor_locator(locmin)
+    axes.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+
+    plt.show()
+
+    # save the plot
+    plt.savefig("plots/effective_volume_WD.pdf")
+    plt.savefig("plots/effective_volume_WD.png")
+
+
+def test_plot_effective_volume_bh():
+    import matplotlib
+
+    font_size = 20
+    matplotlib.rcParams.update({"font.size": font_size})
+
+    fig, axes = plt.subplots(num=11, figsize=[12, 8])
+
+    surveys = ["TESS", "ZTF", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
+    # surveys = surveys[:2]  # debug only
+    markers = ["X", "v", "*", "^", "s", "D", "P"]
+
+    for i, s in enumerate(surveys):
+        ds = fetch_distributions(s, obj="BH", space_density_pc3=10**-5, verbose=False)
+        sma = ds.semimajor_axis.values
+        ev = ds.effective_volume.values
+        p = axes.plot(sma[::2], ev[::2], label=s, linestyle=None, marker=markers[i], linewidth=0, markersize=8)
+        axes.plot(sma, ev, "-", linewidth=2.0, color=p[0].get_color())
+
+    # axes.set_ylim((1e-3, 3e6))
+    # axes.set_xlim((8e-3, 15))
+    axes.set_yscale("log")
+    axes.set_xscale("log")
+
+    axes.set_xlabel("Semimajor axis [AU]", fontsize=font_size)
+    axes.set_ylabel("Effective volume [pc$^3$]", fontsize=font_size)
+
+    # minutes (using Kepler's law) assuming a 10 solar mass BH with a 0.6 WD
+    period = lambda x: x ** (3 / 2) * 365.25 * 24 * 60 / np.sqrt(10.6)
+    ax2 = axes.twiny()
+    ax2.set_xlabel("Period [minutes]", fontsize=font_size)
+    ax2.set_xlim([period(x) for x in axes.get_xlim()])
+    ax2.set_xscale("log")
+
+    # add the model density
+    axes.plot(sma, ds.pc3_per_system, "--k", label="WD-NS/BH density", lw=2.5)
+
+    lgnd = axes.legend(loc="lower right", fontsize=font_size, framealpha=0, ncol=2)
+    for lh in lgnd.legendHandles:
+        lh.set_markersize(12.0)
+        lh.set_linewidth(2.0)
+
+    # following https://stackoverflow.com/questions/44078409/matplotlib-semi-log-plot-minor-tick-marks-are-gone-when-range-is-large
+    locmaj = matplotlib.ticker.LogLocator(base=10, numticks=12)
+    axes.yaxis.set_major_locator(locmaj)
+    locmin = matplotlib.ticker.LogLocator(base=10.0, subs=(0.2, 0.4, 0.6, 0.8), numticks=12)
+    axes.yaxis.set_minor_locator(locmin)
+    axes.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+
+    plt.show()
+
+    # save the plot
+    plt.savefig("plots/effective_volume_BH.pdf")
+    plt.savefig("plots/effective_volume_BH.png")
+
+
 @pytest.mark.skip(reason="This plot is replaced by the effective volume plot.")
 def test_plot_sensitivity_and_model(wd_ds):
     fig, axes = plt.subplots(num=10, figsize=[10, 6])
@@ -528,7 +644,8 @@ def test_plot_sensitivity_and_model(wd_ds):
     plt.savefig("plots/sensitivity_vs_model.png")
 
 
-def test_plot_effective_volume_wd(wd_ds):
+@pytest.mark.skip(reason="This plot is replaced by the new effective volume plot.")
+def test_plot_effective_volume_wd_old_version(wd_ds):
     import matplotlib
 
     font_size = 20
@@ -604,7 +721,8 @@ def test_plot_effective_volume_wd(wd_ds):
     plt.savefig("plots/effective_volume_WD.png")
 
 
-def test_plot_effective_volume_bh(bh_ds):
+@pytest.mark.skip(reason="This plot is replaced by the new effective volume plot.")
+def test_plot_effective_volume_bh_old_version(bh_ds):
     import matplotlib
 
     font_size = 20
@@ -709,6 +827,102 @@ def test_plot_effective_volume_bh(bh_ds):
     plt.savefig("plots/effective_volume_BH.png")
 
 
+def test_plot_detections_per_mass_index():
+    import matplotlib
+
+    font_size = 20
+    matplotlib.rcParams.update({"font.size": font_size})
+
+    survey = "LSST"
+    mass_indices = ["low", "mid", "high"]
+    markers = ["X", "v", "s"]
+    styles = ["-", "-.", "--"]
+
+    fig, axes = plt.subplots(num=12, figsize=[12, 8])
+    det = []
+    for i, mass in enumerate(mass_indices):
+        ds = fetch_distributions(survey, obj="BH", space_density_pc3=1e-5, mass_index=mass)
+        sma = ds.semimajor_axis.values
+        det.append(ds.detections.values)
+        # p = axes.plot(sma, det, linestyle=None, marker=markers[i], label=mass)
+        # axes.plot(sma, det, '-', linewidth=2.0, color=p[0].get_color())
+        axes.plot(sma, det[-1], linestyle=styles[i], label=mass, linewidth=2.0)
+
+        axes.set_ylim((1e-2, 2e2))
+        axes.set_xlim((8e-4, 2))
+        axes.set_yscale("log")
+        axes.set_xscale("log")
+        axes.set_xlabel("Semimajor axis [AU]", fontsize=font_size)
+        axes.set_ylabel("Number of detections", fontsize=font_size)
+
+    # axes.plot(sma, det[2]/det[0])
+
+    lgnd = axes.legend(loc="upper right", fontsize=font_size)
+    for lh in lgnd.legendHandles:
+        lh.set_markersize(12.0)
+        lh.set_linewidth(2.0)
+
+    plt.show()
+
+    # save the plot
+    plt.savefig("plots/detections_mass_index.pdf")
+    plt.savefig("plots/detections_mass_index.png")
+
+
+def test_plot_number_detections_vs_sma():
+    import matplotlib
+
+    font_size = 20
+    matplotlib.rcParams.update({"font.size": font_size})
+
+    surveys = ["TESS", "ZTF", "LSST"]
+    markers = ["X", "v", "*", "^", "s", "D", "P"]
+    # surveys = ['LSST']
+
+    densities = {"WD": 1 / 1818, "BH": 1e-5}
+
+    fig, axes = plt.subplots(1, 2, num=13, figsize=[12, 8])
+    fig.subplots_adjust(wspace=0)
+    lgnd = []
+    for j, obj in enumerate(["WD", "BH"]):
+        for i, survey in enumerate(surveys):
+            ds = fetch_distributions(survey, obj=obj, space_density_pc3=densities[obj], verbose=False)
+            sma = ds.semimajor_axis.values
+            det = ds.detections.values
+            p = axes[j].plot(sma, det, "-", linewidth=2.0, marker=markers[i], label=survey)
+            det_f = ds.detections_followup.values
+            axes[j].plot(sma, det_f, "--", linewidth=2.0, color=p[0].get_color())
+
+            axes[j].set_ylim((1e-6, 2e2))
+            axes[j].set_yscale("log")
+            axes[j].set_xscale("log")
+            axes[j].set_xlabel("Semimajor axis [AU]", fontsize=font_size)
+            axes[j].set_ylabel("Number of detections", fontsize=font_size)
+
+        lgnd.append(axes[j].legend(loc="lower left", fontsize=font_size))
+        for lh in lgnd[-1].legendHandles:
+            lh.set_markersize(12.0)
+            lh.set_linewidth(2.0)
+
+    axes[0].get_xaxis().set_ticks([1e-2, 1e-1, 1])
+    axes[0].set_title("WD-WD")
+
+    axes[1].get_yaxis().set_ticks([])
+    axes[1].set_ylabel(None)
+    ax2 = axes[1].twinx()
+    ax2.set_ylim(axes[1].get_ylim())
+    ax2.set_yscale("log")
+    lgnd[1].set(loc="lower center")
+
+    axes[1].set_title("WD-NS/BH")
+
+    plt.show()
+
+    # save the plot
+    plt.savefig("plots/detection_numbers.pdf")
+    plt.savefig("plots/detection_numbers.png")
+
+
 def test_plot_semimajor_axis_population():
     fig, axes = plt.subplots(num=12, figsize=[8, 6])
 
@@ -716,10 +930,14 @@ def test_plot_semimajor_axis_population():
     binary_fraction = 0.1
     sma = np.geomspace(1e-4, 50, 1000)
 
-    g = Grid()
-    g.setup_demo_scan(wd_lens=True)
-    g.star_masses = [0.6]
-    number = g.semimajor_axis_distribution(alpha=-1.3, sma=sma)
+    # g = Grid()
+    # g.setup_demo_scan(wd_lens=True)
+    # g.star_masses = [0.6]
+    # number = g.semimajor_axis_distribution(alpha=-1.3, sma=sma)
+    number = semimajor_axis_distribution(sma=sma, star_masses=[0.6], lens_masses=[0.6], alpha=-1.3)
+    number = number.reshape(len(sma))
+    number = number / np.sum(number)
+
     number *= space_density * binary_fraction / np.sum(number)
 
     axes.plot(sma, number, lw=3, label="total number of binary WDs")

@@ -276,9 +276,9 @@ def semimajor_axis_distribution(sma, star_masses, lens_masses, alpha=-1.3):
     const = 3.116488722396829e-09  # in units of AU^4 Gyr^-1 solar_mass ^-3
 
     t0 = 13.5  # age of the galaxy in Gyr
-    m1 = star_masses.reshape(1, len(star_masses), 1)
-    m2 = lens_masses.reshape(len(lens_masses), 1, 1)
-    sma = sma.reshape(1, 1, len(sma))
+    m1 = np.array(star_masses).reshape(1, len(star_masses), 1)
+    m2 = np.array(lens_masses).reshape(len(lens_masses), 1, 1)
+    sma = np.array(sma).reshape(1, 1, len(sma))
     x = sma / (const * m1 * m2 * (m1 + m2) * t0) ** (1 / 4)
 
     if alpha == -1:
@@ -399,7 +399,7 @@ def density_model(ds, space_density_pc3=1 / 1000):
     ds.detections_followup.attrs["long_name"] = "Detections with followup"
 
 
-def add_followup_prob(ds, frac=0.25, years=5):
+def add_followup_prob(ds, frac=0.1, years=1):
     """
     Add the probability that a followup campaign would successfully
     identify repeat occurrences of the system's flare in X years
@@ -438,6 +438,7 @@ def fetch_distributions(
     sma_index="mid",
     space_density_pc3=1 / 1000,
     clear_cache=False,
+    verbose=False,
 ):
     """
     Run all the above functions, starting from loading the raw dataset
@@ -475,13 +476,18 @@ def fetch_distributions(
         Default is False, use the cached results.
         We cache the marginalize_mass_temp() results in the "saved" folder
         in files that correspond to all the mass/temp/sma indices and object type.
+    verbose: bool
+        Wether to print out some information about the calculations.
 
     Returns
     -------
     out_ds: xarray Dataset
         The dataset with the effective volume and probability distribution,
         as a function of semimajor axis only. Also adds the density of systems,
-        the number of pc^3 required to find one system, and the number of detections.
+        the number of pc^3 required to find one system, the number of detections,
+        and the number of detections (and effective volume) accounting for
+        which systems can be followed up (with the default parameters
+        given in followup_prob()).
     """
     obj = obj.upper()
     if obj not in ["WD", "BH"]:
@@ -491,30 +497,32 @@ def fetch_distributions(
     if survey not in ["TESS", "ZTF", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]:
         raise ValueError('survey must be "TESS", "ZTF", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY" or "LAST"')
 
-    # get the raw data from file
-    filename = os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_{obj}.nc")
-    if not os.path.isfile(filename):
-        raise FileNotFoundError(f"Cannot find file {filename}. Try using utils.fetch_volumes first!")
-
-    ds = xr.load_dataset(filename, decode_times=False)
-
     # try to load the cached value:
     cache_filename = f"saved/marginalized_{survey}_{obj}_{temp_index}_{mass_index}_{sma_index}.nc"
     cache_filename = os.path.join(ROOT_FOLDER, cache_filename)
     if clear_cache or not os.path.isfile(cache_filename):
-        # if clear_cache:
-        #     print(f'Not allowed to use cache, recaclulating {cache_filename}')
-        # if not os.path.isfile(cache_filename):
-        #     print(f'No cache file {cache_filename}, calculating new values')
-
         # cannot (or not allowed to use) the cached value, so calculate it:
+        if verbose and clear_cache:
+            print(f"Not allowed to use cache, recaclulating {cache_filename}")
+        if verbose and not os.path.isfile(cache_filename):
+            print(f"No cache file {cache_filename}, calculating new values")
+
+        # get the raw data from file
+        filename = os.path.join(ROOT_FOLDER, f"saved/simulate_{survey}_{obj}.nc")
+        if not os.path.isfile(filename):
+            raise FileNotFoundError(f"Cannot find file {filename}. Try using utils.fetch_volumes first!")
+
+        ds = xr.load_dataset(filename, decode_times=False)
+
+        # do the marginalizations and probability distributions:
         da = marginalize_declinations(ds)
         prob = get_prob_dataset(da, obj=obj, temp_index=temp_index, mass_index=mass_index, sma_index=sma_index)
         ds_sma = marginalize_mass_temp(da, prob)
 
         add_followup_prob(ds)  # this will reduce the effective volume with the followup probability
-        prob2 = get_prob_dataset(da, obj=obj, temp_index=temp_index, mass_index=mass_index, sma_index=sma_index)
-        ds_sma2 = marginalize_mass_temp(da, prob2)
+        da2 = marginalize_declinations(ds)
+        prob2 = get_prob_dataset(da2, obj=obj, temp_index=temp_index, mass_index=mass_index, sma_index=sma_index)
+        ds_sma2 = marginalize_mass_temp(da2, prob2)
 
         # add the effective volume weighted by followup probability to the dataset
         ds_sma["effective_volume_followup"] = ds_sma2["effective_volume"]
@@ -525,7 +533,8 @@ def fetch_distributions(
         ds_sma.to_netcdf(cache_filename)
 
     else:  # can just load the cached value
-        # print(f'loading cached {cache_filename}')
+        if verbose:
+            print(f"loading cached {cache_filename}")
         ds_sma = xr.load_dataset(cache_filename, decode_times=False)
 
         # rescale to the new space density:
@@ -534,6 +543,7 @@ def fetch_distributions(
         ds_sma["density"] *= rescale
         ds_sma["pc3_per_system"] /= rescale
         ds_sma["detections"] *= rescale
+        ds_sma["detections_followup"] *= rescale
 
     return ds_sma
 
@@ -548,8 +558,9 @@ if __name__ == "__main__":
     ds_sma_wd = marginalize_mass_temp(da_wd, prob_wd)
 
     add_followup_prob(ds_wd)  # this will reduce the effective volume with the followup probability
-    prob2 = get_prob_dataset(da_wd, obj="WD")
-    ds_sma_wd2 = marginalize_mass_temp(da_wd, prob2)
+    da_wd2 = marginalize_declinations(ds_wd)
+    prob2 = get_prob_dataset(da_wd2, obj="WD")
+    ds_sma_wd2 = marginalize_mass_temp(da_wd2, prob2)
 
     # add the effective volume weighted by followup probability to the dataset
     ds_sma_wd["effective_volume_followup"] = ds_sma_wd2["effective_volume"]
@@ -562,8 +573,9 @@ if __name__ == "__main__":
     ds_sma_bh = marginalize_mass_temp(da_bh, prob_bh)
 
     add_followup_prob(ds_bh)  # this will reduce the effective volume with the followup probability
-    prob2 = get_prob_dataset(da_bh, obj="BH", mass_index="mid")
-    ds_sma_bh2 = marginalize_mass_temp(da_bh, prob2)
+    da_bh2 = marginalize_declinations(ds_bh)
+    prob2 = get_prob_dataset(da_bh2, obj="BH", mass_index="mid")
+    ds_sma_bh2 = marginalize_mass_temp(da_bh2, prob2)
 
     # add the effective volume weighted by followup probability to the dataset
     ds_sma_bh["effective_volume_followup"] = ds_sma_bh2["effective_volume"]
