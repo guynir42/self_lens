@@ -12,6 +12,8 @@ from src.grid_scan import Grid
 from src.distributions import fetch_distributions, semimajor_axis_distribution
 
 
+CLEAR_CACHE = False
+
 # ref: https://stackoverflow.com/questions/15713279/calling-pylab-savefig-without-display-in-ipython
 matplotlib.use("Agg")
 
@@ -36,7 +38,7 @@ def test_make_individual_geometries():
 
 
 def test_make_multiple_geometries():
-    fig, axes = plt.subplots(1, 3, figsize=[12, 4])
+    fig, axes = plt.subplots(1, 3, num=1, figsize=[12, 4])
     distances = [0, 0.75, 1.05]
 
     for i, d in enumerate(distances):
@@ -76,7 +78,7 @@ def test_make_lightcurves_sources():
         mag.append(radial_lightcurve(distances=distances, source_radius=s, occulter_radius=0))
 
     # plot these
-    fig = plt.figure(num=1.0, figsize=[12, 6])
+    fig = plt.figure(num=2, figsize=[12, 6])
     fig.clf()
     # markers = ['*', 'v', 's', 'o', 's', 'x']
     line_styles = ["-", "--", "-.", ":"]
@@ -115,7 +117,7 @@ def test_make_lightcurves_occulters():
         mag.append(radial_lightcurve(distances=distances, source_radius=source, occulter_radius=occ))
 
     # plot these
-    fig = plt.figure(num=1.1, figsize=[12, 6])
+    fig = plt.figure(num=3, figsize=[12, 6])
     fig.clf()
     # markers = ['*', 'v', 's', 'o', 's', 'x']
     line_styles = ["-", "--", "-.", ":"]
@@ -227,7 +229,7 @@ def test_make_magnification_vs_period_plot(sim):
         sim.star_temp = 7000
         sim.declination = 0
 
-        fig = plt.figure(num=2, figsize=[23, 14])
+        fig = plt.figure(num=4, figsize=[23, 14])
         plt.clf()
         # ax = fig.add_axes([0.08, 0.08, 0.65, 0.87])
         ax = fig.add_axes([0.08, 0.08, 0.87, 0.87])
@@ -441,7 +443,7 @@ def test_plot_survey_precisions():
 
     axes.set_yticklabels(labels)
 
-    axes.legend(loc="lower right", fontsize=20, ncol=2)
+    axes.legend(loc="lower right", fontsize=20, ncol=2, framealpha=0)
 
     # save the plot
     plt.savefig("plots/photometric_precision.pdf")
@@ -472,18 +474,16 @@ def test_plot_effective_volume_wd():
     font_size = 20
     matplotlib.rcParams.update({"font.size": font_size})
 
-    fig, axes = plt.subplots(num=11, figsize=[12, 8])
-    fig.clf()
-    fig, axes = plt.subplots(num=11, figsize=[12, 8])
+    fig, axes = plt.subplots(num=6, figsize=[12, 8])
 
     surveys = ["TESS", "ZTF", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
     # surveys = surveys[:2]  # debug only
     markers = ["X", "v", "*", "^", "s", "D", "P"]
 
     for i, s in enumerate(surveys):
-        ds = fetch_distributions(s, obj="WD", space_density_pc3=1 / 1818, verbose=False)
+        ds = fetch_distributions(s, obj="WD", space_density=1 / 1818, verbose=False, clear_cache=CLEAR_CACHE)
         sma = ds.semimajor_axis.values
-        ev = ds.effective_volume.values
+        ev = ds.ev_sma.values
         p = axes.plot(sma[::2], ev[::2], label=s, linestyle=None, marker=markers[i], linewidth=0, markersize=8)
         axes.plot(sma, ev, "-", linewidth=2.0, color=p[0].get_color())
 
@@ -503,7 +503,7 @@ def test_plot_effective_volume_wd():
     ax2.set_xscale("log")
 
     # add the model density
-    axes.plot(sma, ds.pc3_per_system, "--k", label="WD-WD density", lw=2.5)
+    axes.plot(sma, ds.volume_sma, "--k", label="WD-WD density", lw=2.5)
 
     lgnd = axes.legend(loc="lower center", fontsize=font_size, framealpha=0, ncol=2)
     for lh in lgnd.legendHandles:
@@ -530,16 +530,16 @@ def test_plot_effective_volume_bh():
     font_size = 20
     matplotlib.rcParams.update({"font.size": font_size})
 
-    fig, axes = plt.subplots(num=11, figsize=[12, 8])
+    fig, axes = plt.subplots(num=7, figsize=[12, 8])
 
     surveys = ["TESS", "ZTF", "LSST", "DECAM", "CURIOS", "CURIOS_ARRAY", "LAST"]
     # surveys = surveys[:2]  # debug only
     markers = ["X", "v", "*", "^", "s", "D", "P"]
 
     for i, s in enumerate(surveys):
-        ds = fetch_distributions(s, obj="BH", space_density_pc3=10**-5, verbose=False)
+        ds = fetch_distributions(s, obj="BH", space_density=10**-5, verbose=False, clear_cache=CLEAR_CACHE)
         sma = ds.semimajor_axis.values
-        ev = ds.effective_volume.values
+        ev = ds.ev_sma.values
         p = axes.plot(sma[::2], ev[::2], label=s, linestyle=None, marker=markers[i], linewidth=0, markersize=8)
         axes.plot(sma, ev, "-", linewidth=2.0, color=p[0].get_color())
 
@@ -559,7 +559,7 @@ def test_plot_effective_volume_bh():
     ax2.set_xscale("log")
 
     # add the model density
-    axes.plot(sma, ds.pc3_per_system, "--k", label="WD-NS/BH density", lw=2.5)
+    axes.plot(sma, ds.volume_sma, "--k", label="WD-NS/BH density", lw=2.5)
 
     lgnd = axes.legend(loc="lower right", fontsize=font_size, framealpha=0, ncol=2)
     for lh in lgnd.legendHandles:
@@ -620,7 +620,7 @@ def test_plot_sensitivity_and_model(wd_ds):
     # axes.plot(sma, prob['mid'], color='k', label=f'{mass}M$_\odot$, {temp}$^\circ$K')
     axes.plot(sma, prob["mid"], color="k")
 
-    axes.legend(loc="upper right", fontsize=14)
+    axes.legend(loc="upper right", fontsize=14, framealpha=0)
 
     axes.set_xlim((min_sma / 2, 0.4))
     # plt.ylim((float(sens.min() * 0.5), max(prob['mid']) * 1e2))
@@ -838,12 +838,12 @@ def test_plot_detections_per_mass_index():
     markers = ["X", "v", "s"]
     styles = ["-", "-.", "--"]
 
-    fig, axes = plt.subplots(num=12, figsize=[12, 8])
+    fig, axes = plt.subplots(num=8, figsize=[12, 8])
     det = []
     for i, mass in enumerate(mass_indices):
-        ds = fetch_distributions(survey, obj="BH", space_density_pc3=1e-5, mass_index=mass)
+        ds = fetch_distributions(survey, obj="BH", space_density=1e-5, mass_index=mass, clear_cache=CLEAR_CACHE)
         sma = ds.semimajor_axis.values
-        det.append(ds.detections.values)
+        det.append(ds.detections_sma.values)
         # p = axes.plot(sma, det, linestyle=None, marker=markers[i], label=mass)
         # axes.plot(sma, det, '-', linewidth=2.0, color=p[0].get_color())
         axes.plot(sma, det[-1], linestyle=styles[i], label=mass, linewidth=2.0)
@@ -857,7 +857,7 @@ def test_plot_detections_per_mass_index():
 
     # axes.plot(sma, det[2]/det[0])
 
-    lgnd = axes.legend(loc="upper right", fontsize=font_size)
+    lgnd = axes.legend(loc="upper right", fontsize=font_size, framealpha=0)
     for lh in lgnd.legendHandles:
         lh.set_markersize(12.0)
         lh.set_linewidth(2.0)
@@ -869,6 +869,80 @@ def test_plot_detections_per_mass_index():
     plt.savefig("plots/detections_mass_index.png")
 
 
+def test_plot_effective_volume_per_mass():
+    import matplotlib
+
+    font_size = 20
+    matplotlib.rcParams.update({"font.size": font_size})
+
+    surveys = ["TESS", "ZTF", "LSST"]
+    markers = ["X", "v", "*", "^", "s", "D", "P"]
+
+    fig, ax = plt.subplots(1, 1, num=9, figsize=[12, 8])
+    fig.subplots_adjust(wspace=0)
+
+    for i, survey in enumerate(surveys):
+        ds = fetch_distributions(survey, obj="BH", space_density=1e-5, clear_cache=CLEAR_CACHE)
+        mass = ds.lens_mass.values
+        ev = ds.ev_mass.values
+        ax.plot(mass, ev, linewidth=0, marker=markers[i])
+
+        # fit to a sqrt
+        # forcing an exact match to sqrt
+        adjusted = ev / np.sqrt(mass)
+        coeff = np.mean(adjusted)
+        ev_fit = coeff * np.sqrt(mass)
+        coeff_power = int(np.floor(np.log10(coeff)))
+        coeff_number = f"{coeff / 10 ** coeff_power:.2f}"
+        coeff_power = str(coeff_power)
+        coeff_power = r"$\times 10^{" + coeff_power + "}$"
+
+        tag = "V= " + coeff_number + coeff_power + r"${M_L}^{1/2}$"
+
+        # using a log fit (assumes approximate sqrt dependence)
+        # p = np.polyfit(np.log10(mass), np.log10(ev), 1)
+        # ev_fit = 10 ** (p[0] * np.log10(mass) + p[1])
+        # tag = f'{p[0]:.2f}'
+        # tag = '*M^{' + tag + '}$'
+        # tag = f'V= ${10 ** p[1]:.1e}' + tag
+
+        # using a sqrt of a polynomial with rank 2
+        # p = np.polyfit(mass, ev ** 2, 2)
+        # ev_fit = np.sqrt(np.poly1d(p)(mass))
+        # tag = f'{p[2]:.1e} + {p[1]:.1e}*M {p[0]:.1e}*M^2'
+        # tag = 'V= $\sqrt{' + tag + '}$'
+
+        # using a sqrt of a polynomial with rank 3
+        # p = np.polyfit(mass, ev ** 2, 3)
+        # ev_fit = np.sqrt(np.poly1d(p)(mass))
+        # tag = f'{p[3]:.1e} + {p[2]:.1e}*M + {p[1]:.1e}*M^2 + {p[0]:.1e}*M^3'
+        # tag = 'V= $\sqrt{' + tag + '}$'
+
+        tag = f"{survey}: {tag}"
+
+        ax.plot(mass, ev_fit, "-", linewidth=2.0, color=ax.lines[-1].get_color(), label=tag)
+
+        ax.set_ylim((2e4, 1e9))
+        ax.set_yscale("log")
+        # ax.set_xscale("log")
+        ax.set_xlabel(r"Lens mass [M$_\odot$]", fontsize=font_size)
+        ax.set_ylabel(r"Effective volume [pc$^3$]", fontsize=font_size)
+
+    lgnd = ax.legend(loc="lower right", fontsize=font_size, framealpha=0)
+
+    for i, h in enumerate(lgnd.legendHandles):
+        h.set_markersize(12.0)
+        h.set_marker(markers[i])
+    # handles = handles[::2] + handles[1::2]
+    # labels = labels[::2] + labels[1::2]
+
+    plt.show()
+
+    # save the plot
+    plt.savefig("plots/effective_volume_mass.pdf")
+    plt.savefig("plots/effective_volume_mass.png")
+
+
 def test_plot_number_detections_vs_sma():
     import matplotlib
 
@@ -877,20 +951,21 @@ def test_plot_number_detections_vs_sma():
 
     surveys = ["TESS", "ZTF", "LSST"]
     markers = ["X", "v", "*", "^", "s", "D", "P"]
-    # surveys = ['LSST']
 
     densities = {"WD": 1 / 1818, "BH": 1e-5}
 
-    fig, axes = plt.subplots(1, 2, num=13, figsize=[12, 8])
+    fig, axes = plt.subplots(1, 2, num=10, figsize=[12, 8])
     fig.subplots_adjust(wspace=0)
     lgnd = []
     for j, obj in enumerate(["WD", "BH"]):
         for i, survey in enumerate(surveys):
-            ds = fetch_distributions(survey, obj=obj, space_density_pc3=densities[obj], verbose=False)
+            ds = fetch_distributions(
+                survey, obj=obj, space_density=densities[obj], verbose=False, clear_cache=CLEAR_CACHE
+            )
             sma = ds.semimajor_axis.values
-            det = ds.detections.values
+            det = ds.detections_sma.values
             p = axes[j].plot(sma, det, "-", linewidth=2.0, marker=markers[i], label=survey)
-            det_f = ds.detections_followup.values
+            det_f = ds.detections_sma_followup.values
             axes[j].plot(sma, det_f, "--", linewidth=2.0, color=p[0].get_color())
 
             axes[j].set_ylim((1e-6, 2e2))
@@ -899,7 +974,7 @@ def test_plot_number_detections_vs_sma():
             axes[j].set_xlabel("Semimajor axis [AU]", fontsize=font_size)
             axes[j].set_ylabel("Number of detections", fontsize=font_size)
 
-        lgnd.append(axes[j].legend(loc="lower left", fontsize=font_size))
+        lgnd.append(axes[j].legend(loc="lower left", fontsize=font_size, framealpha=0))
         for lh in lgnd[-1].legendHandles:
             lh.set_markersize(12.0)
             lh.set_linewidth(2.0)
@@ -924,7 +999,7 @@ def test_plot_number_detections_vs_sma():
 
 
 def test_plot_semimajor_axis_population():
-    fig, axes = plt.subplots(num=12, figsize=[8, 6])
+    fig, axes = plt.subplots(num=11, figsize=[8, 6])
 
     space_density = 0.0055
     binary_fraction = 0.1
@@ -985,7 +1060,7 @@ def test_plot_semimajor_axis_population():
     ax3.tick_params(axis="y", labelsize=12)
     ax3.set_yscale("log")
 
-    axes.legend(loc="lower left", fontsize=14)
+    axes.legend(loc="lower left", fontsize=14, framealpha=0)
 
     plt.show()
 

@@ -287,14 +287,17 @@ def semimajor_axis_distribution(sma, star_masses, lens_masses, alpha=-1.3):
         return -(x ** (4 + alpha)) * ((1 + x ** (-4)) ** ((alpha + 1) / 4) - 1)
 
 
-def marginalize_mass_temp(ev, prob):
+def marginalize_mass_temp_sma(ev, prob):
     """
-    Marginalize over lens and star temperatures and masses.
+    Marginalize over lens and star temperatures and masses,
+    and semimajor axis (sma).
     Returns a new dataset that holds the effective volume in one
     data array (ev) and the probability to find a system in each
     semimajor axis value in another data array (prob).
-    In both cases these are the weighted average over the
-    mass and temperature of lens and star.
+    Also return data arrays ev/prob for different lens masses.
+    Both effective volume and probability are the weighted average
+    (marginalized) over the mass and temperature of lens and star,
+    and for the mass distribution case over semimajor axis instead.
 
     The ev data array is usually on a less fine grid than the prob data array.
     For that reason we must interpolate ev unto prob.
@@ -302,10 +305,16 @@ def marginalize_mass_temp(ev, prob):
     do this in each individual semimajor axis step separately,
     and do the sum over the interpolated product in a loop.
 
-    To calculate the total number of detections, multiply ev * prob
-    and integrate over semimajor axis (including the variable step size dsma).
+    To calculate the total number of detections, multiply ev_sma * prob_sma
+    and integrate over semimajor axis.
     This sum is the number of detections assuming a single system per 1pc^3
     including all values of semimajor axis, temperatures and masses in range.
+
+    The ev/prob as function of lens mass (ev_mass and prob_mass)
+    are not interpolated on the lens_mass coordinate because
+    (a) we usually don't calculate detection numbers over this coordinate
+    (b) showing the effective volume as function of mass doesn't get much
+        from having additional, interpolated data points.
 
     Parameters
     ----------
@@ -320,6 +329,8 @@ def marginalize_mass_temp(ev, prob):
     ds: xarray Dataset
         The dataset with the effective volume and probability distribution,
         as a function of semimajor axis only.
+        Additional datasets for effective volume and probability as function
+        of lens mass are also included.
     """
     sma = prob.semimajor_axis.values
     if not np.array_equal(sma, ev.semimajor_axis.values):
@@ -328,41 +339,80 @@ def marginalize_mass_temp(ev, prob):
     ev_per_sma = np.zeros(len(sma), dtype=float)
     prob_per_sma = np.zeros(len(sma), dtype=float)
     for i, a in enumerate(sma):
-        prob_sma = prob.isel(semimajor_axis=i)  # the probability distribution for this semimajor axis value
+        new_prob = prob.isel(semimajor_axis=i)  # the probability distribution for this semimajor axis value
         new_ev = ev.isel(semimajor_axis=i)  # the effective volume for this semimajor axis value
         if len(ev.lens_temp) == 1:
             new_ev = new_ev.isel(lens_temp=0)
-            prob_sma = prob_sma.isel(lens_temp=0)
-        new_ev = new_ev.interp_like(prob_sma, method="cubic")
+            new_prob = new_prob.isel(lens_temp=0)
+        new_ev = new_ev.interp_like(new_prob, method="cubic")
         new_ev = new_ev.where(new_ev > 0, 0)  # remove negative values (that could arise from interpolation)
         if len(ev.lens_temp) == 1:
             coords = ["star_temp", "lens_mass", "star_mass"]
         else:
             coords = ["lens_temp", "star_temp", "lens_mass", "star_mass"]
-        prob_per_sma[i] = prob_sma.sum(coords)
-        ev_per_sma[i] = (new_ev * prob_sma).sum(coords) / prob_per_sma[i]
+        prob_per_sma[i] = new_prob.sum(coords)
+        ev_per_sma[i] = (new_ev * new_prob).sum(coords) / prob_per_sma[i]
 
-    new_ev = xr.DataArray(data=ev_per_sma, coords={"semimajor_axis": sma})
-    new_prob = xr.DataArray(data=prob_per_sma, coords={"semimajor_axis": sma})
+    ev_sma = xr.DataArray(data=ev_per_sma, coords={"semimajor_axis": sma})
+    prob_sma = xr.DataArray(data=prob_per_sma, coords={"semimajor_axis": sma})
 
-    ds = xr.Dataset(data_vars={"effective_volume": new_ev, "probability": new_prob})
-    ds.effective_volume.attrs["name"] = "effective_volume"
-    ds.effective_volume.attrs["long_name"] = "Effective volume"
-    ds.effective_volume.attrs["units"] = "pc^3"
+    # now the same but for the lens mass:
+    masses = ev.lens_mass.values
+
+    ev_per_mass = np.zeros(len(masses), dtype=float)
+    prob_per_mass = np.zeros(len(masses), dtype=float)
+    for i, m in enumerate(masses):
+        # note that the probability is on a much finer grid than the effective volume
+        new_prob = prob.sel(lens_mass=m, method="nearest")  # the probability for this lens mass value
+        new_ev = ev.isel(lens_mass=i)  # the effective volume for this lens mass value
+        if len(ev.lens_temp) == 1:
+            new_ev = new_ev.isel(lens_temp=0)
+            new_prob = new_prob.isel(lens_temp=0)
+        new_ev = new_ev.interp_like(new_prob, method="cubic")
+        new_ev = new_ev.where(new_ev > 0, 0)  # remove negative values (that could arise from interpolation)
+        if len(ev.lens_temp) == 1:
+            coords = ["star_temp", "star_mass", "semimajor_axis"]
+        else:
+            coords = ["lens_temp", "star_temp", "star_mass", "semimajor_axis"]
+        prob_per_mass[i] = new_prob.sum(coords)
+        ev_per_mass[i] = (new_ev * new_prob).sum(coords) / prob_per_mass[i]
+
+    ev_mass = xr.DataArray(data=ev_per_mass, coords={"lens_mass": masses})
+    prob_mass = xr.DataArray(data=prob_per_mass, coords={"lens_mass": masses})
+
+    # combine it all in a dataset:
+    ds = xr.Dataset(
+        data_vars={
+            "ev_sma": ev_sma,
+            "prob_sma": prob_sma,
+            "ev_mass": ev_mass,
+            "prob_mass": prob_mass,
+        }
+    )
+    ds.ev_sma.attrs["name"] = "ev_sma"
+    ds.ev_sma.attrs["long_name"] = "Effective volume"
+    ds.ev_sma.attrs["units"] = "pc^3"
     ds.semimajor_axis.attrs["name"] = "semimajor_axis"
     ds.semimajor_axis.attrs["long_name"] = "Semimajor axis"
     ds.semimajor_axis.attrs["units"] = "AU"
 
+    ds.ev_mass.attrs["name"] = "ev_mass"
+    ds.ev_mass.attrs["long_name"] = "Effective volume"
+    ds.ev_mass.attrs["units"] = "pc^3"
+    ds.lens_mass.attrs["name"] = "lens_mass"
+    ds.lens_mass.attrs["long_name"] = "Lens mass"
+    ds.lens_mass.attrs["units"] = "M_sun"
+
     return ds
 
 
-def density_model(ds, space_density_pc3=1 / 1000):
+def density_model(ds, space_density=1 / 1000):
     """
     Calculate a density model (how many systems per pc^3
     in each semimajor axis bin, and the reciprocal of
     how many pc3 are required to find one system).
     This is added to the dataset as the two new variables
-    "density" and "pc3_per_system".
+    "density_sma" and "volume_sma".
     Also adds the number of detections in each bin into
     the dataset as "detections".
 
@@ -373,30 +423,30 @@ def density_model(ds, space_density_pc3=1 / 1000):
     ds: xarray Dataset
         The dataset with the effective volume and probability distribution,
         as a function of semimajor axis only. This is the output of
-        marginalize_mass_temp.
-    space_density_pc3: float
+        marginalize_mass_temp_sma.
+    space_density: float
         The space density of the objects in pc^-3.
         Default is 1/1000.
 
     """
-    ds["density"] = ds.probability * space_density_pc3
-    ds["pc3_per_system"] = 1 / ds.density
-    ds["detections"] = ds.effective_volume * ds.density
-    ds["detections_followup"] = ds.effective_volume_followup * ds.density
+    ds["density_sma"] = ds.prob_sma * space_density
+    ds["volume_sma"] = 1 / ds.density_sma
+    ds["detections_sma"] = ds.ev_sma * ds.density_sma
+    ds["detections_sma_followup"] = ds.ev_sma_followup * ds.density_sma
 
-    ds.density.attrs["name"] = "density"
-    ds.density.attrs["long_name"] = "Density"
-    ds.density.attrs["units"] = "pc^-3"
+    ds.density_sma.attrs["name"] = "density_sma"
+    ds.density_sma.attrs["long_name"] = "Density"
+    ds.density_sma.attrs["units"] = "pc^-3"
 
-    ds.pc3_per_system.attrs["name"] = "pc3_per_system"
-    ds.pc3_per_system.attrs["long_name"] = "Average volume per system"
-    ds.pc3_per_system.attrs["units"] = "pc^3"
+    ds.volume_sma.attrs["name"] = "volume_sma"
+    ds.volume_sma.attrs["long_name"] = "Average volume per system"
+    ds.volume_sma.attrs["units"] = "pc^3"
 
-    ds.detections.attrs["name"] = "detections"
-    ds.detections.attrs["long_name"] = "Detections"
+    ds.detections_sma.attrs["name"] = "detections_sma"
+    ds.detections_sma.attrs["long_name"] = "Detections"
 
-    ds.detections_followup.attrs["name"] = "detections_followup"
-    ds.detections_followup.attrs["long_name"] = "Detections with followup"
+    ds.detections_sma_followup.attrs["name"] = "detections_sma_followup"
+    ds.detections_sma_followup.attrs["long_name"] = "Detections with followup"
 
 
 def add_followup_prob(ds, frac=0.1, years=1):
@@ -413,11 +463,11 @@ def add_followup_prob(ds, frac=0.1, years=1):
         The dataset with the effective volume, the duty cycle and period.
     frac: float
         Fraction of the time that a telescope is observing the source.
-        Default is 0.25 which represents a single telescope observing
-        the target for an average of 6 hours each night.
+        Default is 0.1 which represents a single telescope observing
+        the target for an average of 2.4 hours each night.
     years: float
         The number of years of followup time to consider.
-        The default is 5 years (which is approximately one grad-length).
+        The default is 1 year.
 
     """
     # how many times do we stand to see the flare in X years?
@@ -436,7 +486,7 @@ def fetch_distributions(
     temp_index="mid",
     mass_index="mid",
     sma_index="mid",
-    space_density_pc3=1 / 1000,
+    space_density=1 / 1000,
     clear_cache=False,
     verbose=False,
 ):
@@ -468,16 +518,16 @@ def fetch_distributions(
         stage, with evolution given by gravitational radiation,
         see reference in Maoz et al 2018
         (https://ui.adsabs.harvard.edu/abs/2018MNRAS.476.2584M/abstract)
-    space_density_pc3: float
+    space_density: float
         The space density of the objects in pc^-3.
         Default is 1/1000.
     clear_cache: bool
-        Wether to clear the results from previous calculations.
+        Whether to clear the results from previous calculations.
         Default is False, use the cached results.
-        We cache the marginalize_mass_temp() results in the "saved" folder
+        We cache the marginalize_mass_temp_sma() results in the "saved" folder
         in files that correspond to all the mass/temp/sma indices and object type.
     verbose: bool
-        Wether to print out some information about the calculations.
+        Whether to print out some information about the calculations.
 
     Returns
     -------
@@ -517,17 +567,17 @@ def fetch_distributions(
         # do the marginalizations and probability distributions:
         da = marginalize_declinations(ds)
         prob = get_prob_dataset(da, obj=obj, temp_index=temp_index, mass_index=mass_index, sma_index=sma_index)
-        ds_sma = marginalize_mass_temp(da, prob)
+        ds_sma = marginalize_mass_temp_sma(da, prob)
 
         add_followup_prob(ds)  # this will reduce the effective volume with the followup probability
         da2 = marginalize_declinations(ds)
         prob2 = get_prob_dataset(da2, obj=obj, temp_index=temp_index, mass_index=mass_index, sma_index=sma_index)
-        ds_sma2 = marginalize_mass_temp(da2, prob2)
+        ds_sma2 = marginalize_mass_temp_sma(da2, prob2)
 
         # add the effective volume weighted by followup probability to the dataset
-        ds_sma["effective_volume_followup"] = ds_sma2["effective_volume"]
+        ds_sma["ev_sma_followup"] = ds_sma2["ev_sma"]
 
-        density_model(ds_sma, space_density_pc3=space_density_pc3)
+        density_model(ds_sma, space_density=space_density)
 
         # save the result:
         ds_sma.to_netcdf(cache_filename)
@@ -538,12 +588,12 @@ def fetch_distributions(
         ds_sma = xr.load_dataset(cache_filename, decode_times=False)
 
         # rescale to the new space density:
-        old_density = float(ds_sma.density.sum())
-        rescale = space_density_pc3 / old_density
-        ds_sma["density"] *= rescale
-        ds_sma["pc3_per_system"] /= rescale
-        ds_sma["detections"] *= rescale
-        ds_sma["detections_followup"] *= rescale
+        old_density = float(ds_sma.density_sma.sum())
+        rescale = space_density / old_density
+        ds_sma["density_sma"] *= rescale
+        ds_sma["volume_sma"] /= rescale
+        ds_sma["detections_sma"] *= rescale
+        ds_sma["detections_sma_followup"] *= rescale
 
     return ds_sma
 
@@ -555,12 +605,12 @@ if __name__ == "__main__":
     ds_wd = xr.load_dataset(filename, decode_times=False)
     da_wd = marginalize_declinations(ds_wd)
     prob_wd = get_prob_dataset(da_wd, obj="WD")
-    ds_sma_wd = marginalize_mass_temp(da_wd, prob_wd)
+    ds_sma_wd = marginalize_mass_temp_sma(da_wd, prob_wd)
 
     add_followup_prob(ds_wd)  # this will reduce the effective volume with the followup probability
     da_wd2 = marginalize_declinations(ds_wd)
     prob2 = get_prob_dataset(da_wd2, obj="WD")
-    ds_sma_wd2 = marginalize_mass_temp(da_wd2, prob2)
+    ds_sma_wd2 = marginalize_mass_temp_sma(da_wd2, prob2)
 
     # add the effective volume weighted by followup probability to the dataset
     ds_sma_wd["effective_volume_followup"] = ds_sma_wd2["effective_volume"]
@@ -570,12 +620,12 @@ if __name__ == "__main__":
     ds_bh = xr.load_dataset(filename, decode_times=False)
     da_bh = marginalize_declinations(ds_bh)
     prob_bh = get_prob_dataset(da_bh, obj="BH", mass_index="mid")
-    ds_sma_bh = marginalize_mass_temp(da_bh, prob_bh)
+    ds_sma_bh = marginalize_mass_temp_sma(da_bh, prob_bh)
 
     add_followup_prob(ds_bh)  # this will reduce the effective volume with the followup probability
     da_bh2 = marginalize_declinations(ds_bh)
     prob2 = get_prob_dataset(da_bh2, obj="BH", mass_index="mid")
-    ds_sma_bh2 = marginalize_mass_temp(da_bh2, prob2)
+    ds_sma_bh2 = marginalize_mass_temp_sma(da_bh2, prob2)
 
     # add the effective volume weighted by followup probability to the dataset
     ds_sma_bh["effective_volume_followup"] = ds_sma_bh2["effective_volume"]
