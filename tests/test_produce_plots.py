@@ -6,6 +6,8 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 
+from num2tex import num2tex, configure
+
 from src.transfer_matrix import single_geometry, radial_lightcurve
 from src.simulator import Simulator
 from src.grid_scan import Grid
@@ -875,7 +877,8 @@ def test_plot_effective_volume_per_mass():
     font_size = 20
     matplotlib.rcParams.update({"font.size": font_size})
 
-    surveys = ["TESS", "ZTF", "LSST"]
+    # surveys = ["TESS", "ZTF", "LSST"]
+    surveys = ["LSST", "ZTF", "TESS"]
     markers = ["X", "v", "*", "^", "s", "D", "P"]
 
     fig, ax = plt.subplots(1, 1, num=9, figsize=[12, 8])
@@ -889,15 +892,14 @@ def test_plot_effective_volume_per_mass():
 
         # fit to a sqrt
         # forcing an exact match to sqrt
-        adjusted = ev / np.sqrt(mass)
-        coeff = np.mean(adjusted)
-        ev_fit = coeff * np.sqrt(mass)
-        coeff_power = int(np.floor(np.log10(coeff)))
-        coeff_number = f"{coeff / 10 ** coeff_power:.2f}"
-        coeff_power = str(coeff_power)
-        coeff_power = r"$\times 10^{" + coeff_power + "}$"
-
-        tag = "V= " + coeff_number + coeff_power + r"${M_L}^{1/2}$"
+        # adjusted = ev / np.sqrt(mass)
+        # coeff = np.mean(adjusted)
+        # ev_fit = coeff * np.sqrt(mass)
+        # coeff_power = int(np.floor(np.log10(coeff)))
+        # coeff_number = f"{coeff / 10 ** coeff_power:.2f}"
+        # coeff_power = str(coeff_power)
+        # coeff_power = r"$\times 10^{" + coeff_power + "}$"
+        # tag = "V= " + coeff_number + coeff_power + r"${M_L}^{1/2}$"
 
         # using a log fit (assumes approximate sqrt dependence)
         # p = np.polyfit(np.log10(mass), np.log10(ev), 1)
@@ -906,21 +908,33 @@ def test_plot_effective_volume_per_mass():
         # tag = '*M^{' + tag + '}$'
         # tag = f'V= ${10 ** p[1]:.1e}' + tag
 
-        # using a sqrt of a polynomial with rank 2
-        # p = np.polyfit(mass, ev ** 2, 2)
-        # ev_fit = np.sqrt(np.poly1d(p)(mass))
-        # tag = f'{p[2]:.1e} + {p[1]:.1e}*M {p[0]:.1e}*M^2'
-        # tag = 'V= $\sqrt{' + tag + '}$'
+        # using a polynomial with rank 2
+        # p = np.polyfit(mass[20:], ev[20:], 2)
 
-        # using a sqrt of a polynomial with rank 3
-        # p = np.polyfit(mass, ev ** 2, 3)
-        # ev_fit = np.sqrt(np.poly1d(p)(mass))
-        # tag = f'{p[3]:.1e} + {p[2]:.1e}*M + {p[1]:.1e}*M^2 + {p[0]:.1e}*M^3'
-        # tag = 'V= $\sqrt{' + tag + '}$'
+        # using a linear fit but only after some value
+        fit_mass = 10
+        idx = np.argmin(abs(mass - 10))
+        p = np.polyfit(mass[idx:], ev[idx:], 1)
+        ev_fit = np.poly1d(p)(mass)
 
-        tag = f"{survey}: {tag}"
+        # render the fit results
+        configure(exp_format="cdot", help_text=False)
+        p2 = p.copy()
+        p2 = p2[::-1]
 
-        ax.plot(mass, ev_fit, "-", linewidth=2.0, color=ax.lines[-1].get_color(), label=tag)
+        tag = "V= "
+        for j, coeff in enumerate(p2):
+            if coeff > 0 and j > 0:
+                tag += "+"
+            tag += f"${num2tex(coeff, precision=2)}$"
+            if j > 0:
+                tag += r"$\times M$"
+                if j > 1:
+                    tag += f"$^{j}$"
+
+        tag = f"{survey +':':5s} {tag}"
+        ax.plot(mass[idx:], ev_fit[idx:], "-", linewidth=2.0, color=ax.lines[-1].get_color(), label=tag)
+        ax.plot(mass[: idx + 1], ev_fit[: idx + 1], "--", linewidth=1.5, color=ax.lines[-1].get_color())
 
         ax.set_ylim((2e4, 1e9))
         ax.set_yscale("log")
@@ -928,13 +942,11 @@ def test_plot_effective_volume_per_mass():
         ax.set_xlabel(r"Lens mass [M$_\odot$]", fontsize=font_size)
         ax.set_ylabel(r"Effective volume [pc$^3$]", fontsize=font_size)
 
-    lgnd = ax.legend(loc="lower right", fontsize=font_size, framealpha=0)
+    lgnd = ax.legend(loc="lower right", fontsize=font_size - 2, framealpha=0)
 
     for i, h in enumerate(lgnd.legendHandles):
         h.set_markersize(12.0)
         h.set_marker(markers[i])
-    # handles = handles[::2] + handles[1::2]
-    # labels = labels[::2] + labels[1::2]
 
     plt.show()
 
@@ -1013,7 +1025,7 @@ def test_plot_semimajor_axis_population():
     number = number.reshape(len(sma))
     number = number / np.sum(number)
 
-    number *= space_density * binary_fraction / np.sum(number)
+    number *= space_density * binary_fraction
 
     axes.plot(sma, number, lw=3, label="total number of binary WDs")
 
@@ -1023,26 +1035,45 @@ def test_plot_semimajor_axis_population():
 
     duty_cycle = r / sma  # in either space or time (total prob is this squared)
 
-    num_observations = 1000  # number of observations on each target (estimate)
-    # distance_pc = 1000  # distance to the target in pc
-
-    number2 = number * duty_cycle**2 * num_observations  # * 4 / 3 * np.pi * distance_pc ** 3
+    number2 = number * duty_cycle
 
     axes.plot(
         sma,
         number2,
         lw=3,
+        label="with geometry and constant monitoring",
+    )
+
+    num_observations = 50  # number of observations on each target (estimate)
+    number3 = number * duty_cycle**2 * num_observations
+    number3 = np.minimum(number2, number3)
+
+    axes.plot(
+        sma,
+        number3,
+        lw=3,
+        ls="--",
+        color=axes.lines[-1].get_color(),
         label=f"with geometry $\\times$ duty cycle $\\times$ {num_observations} visits",
     )
 
-    number3 = number * duty_cycle
+    num_observations = 1000  # number of observations on each target (estimate)
+    number4 = number * duty_cycle**2 * num_observations
+    number4 = np.minimum(number2, number4)
 
-    axes.plot(sma, number3, lw=3, label=f"with geometry and constant monitoring")
+    axes.plot(
+        sma,
+        number4,
+        lw=3,
+        ls=":",
+        color=axes.lines[-1].get_color(),
+        label=f"with geometry $\\times$ duty cycle $\\times$ {num_observations} visits",
+    )
 
     axes.set_xscale("log")
     axes.set_yscale("log")
     axes.set_xlabel("Semimajor axis [AU]", fontsize=16)
-    axes.set_ylabel("Number of WDs per pc$^3$", fontsize=16)
+    axes.set_ylabel("Number of DWDs per pc$^3$", fontsize=16)
     axes.tick_params(axis="x", labelsize=12)
     axes.tick_params(axis="y", labelsize=12)
 
@@ -1055,7 +1086,7 @@ def test_plot_semimajor_axis_population():
     ax2.set_xscale("log")
 
     ax3 = axes.twinx()
-    ax3.set_ylabel("Fraction of all WDs", fontsize=14)
+    ax3.set_ylabel("Fraction of all DWDs", fontsize=14)
     ax3.set_ylim([y / space_density for y in axes.get_ylim()])
     ax3.tick_params(axis="y", labelsize=12)
     ax3.set_yscale("log")
