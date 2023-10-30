@@ -96,7 +96,7 @@ def test_make_lightcurves_sources():
             label=f"{s:.2f}",
         )
 
-    plt.legend(fontsize=24, title="source radius", title_fontsize=22)
+    plt.legend(fontsize=24, title="source radius", title_fontsize=22, framealpha=0.0)
     plt.xlabel("Source-lens distance [Einstein radii]", fontsize=24)
     plt.ylabel("magnification", fontsize=24)
     [l.set_fontsize(24) for l in plt.gca().get_xticklabels()]
@@ -136,7 +136,7 @@ def test_make_lightcurves_occulters():
             label=f"{occ:.2f}",
         )
 
-    plt.legend(fontsize=24, title="occulter radius", title_fontsize=22)
+    plt.legend(fontsize=24, title="occulter radius", title_fontsize=22, framealpha=0.0)
     plt.xlabel("Source-lens distance [Einstein radii]", fontsize=24)
     plt.ylabel("magnification", fontsize=24)
     [l.set_fontsize(24) for l in plt.gca().get_xticklabels()]
@@ -148,6 +148,45 @@ def test_make_lightcurves_occulters():
     # save the plots
     plt.savefig("plots/example_lcs_occulters.pdf")
     plt.savefig("plots/example_lcs_occulters.png")
+
+
+def test_make_astrometry_curves():
+    distances = np.linspace(0, 2.0, 20)
+    sources = [0.25, 0.5, 1.0, 2.0]
+    offsets = []
+    for i, s in enumerate(sources):
+        _, offset = radial_lightcurve(distances=distances, source_radius=s, occulter_radius=0, get_offsets=True)
+        offsets.append(offset)
+
+    # plot these
+    fig = plt.figure(num=3, figsize=[12, 6])
+    fig.clf()
+    # markers = ['*', 'v', 's', 'o', 's', 'x']
+    line_styles = ["-", "--", "-.", ":"]
+    for i, s in enumerate(sources):
+        plt.plot(
+            distances,
+            offsets[i],
+            lw=4.0,
+            ms=10,
+            marker=None,
+            ls=line_styles[i],
+            fillstyle="full",
+            label=f"{s:.2f}",
+        )
+    plt.xlim(-0.15, 2.0)
+    plt.legend(fontsize=24, loc="upper left", title="source radius", title_fontsize=22, framealpha=0.0)
+    plt.xlabel("Source-lens distance [Einstein radii]", fontsize=24)
+    plt.ylabel("astrometric offset [Einstein radii]", fontsize=24)
+    [l.set_fontsize(24) for l in plt.gca().get_xticklabels()]
+    [l.set_fontsize(24) for l in plt.gca().get_yticklabels()]
+
+    plt.gca().set_position([0.13, 0.14, 0.82, 0.80])
+    plt.show()
+
+    # save the plots
+    plt.savefig("plots/example_astrometric_shifts.pdf")
+    plt.savefig("plots/example_astrometric_shifts.png")
 
 
 def test_make_example_system_wd_wd(sim):
