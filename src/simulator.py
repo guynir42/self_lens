@@ -1395,6 +1395,13 @@ class System:
         legend_labels.append(mag_str)
         legend_handles.append(Line2D([0], [0], lw=0))
 
+        # add the gravitational strain and S/N
+        strain, snr = self.get_gravitational_strain()
+
+        # add results to the legend
+        legend_labels.append(f"Strain= {strain:.2e}, S/N= {snr:.2g}")
+        legend_handles.append(Line2D([0], [0], lw=0))
+
         ax[0].legend(
             legend_handles,
             legend_labels,
@@ -1517,6 +1524,49 @@ class System:
             return f"{P / 24:.2g} days"
 
         return f"{P:.2g} h"
+
+    def get_gravitational_strain(self, time_yrs=4.0, distance_pc=100):
+        """
+        Get an estimate of the gravitational wave strain S/N measured by
+        a space-based gravitational wave detector like, e.g., LISA,
+        over an observing time of time_yrs years (default 4yr).
+
+        Uses the formulas given here (and other places):
+        https://iopscience.iop.org/article/10.3847/2041-8213/ab53e5
+
+        Parameters
+        ----------
+        time_yrs: float
+            The observing time in years. Default is 4.0.
+        distance_pc: float
+            The distance from observer to the system, in pc.
+            The default is 100pc. Note that GW strain scales as 1/r,
+            not as 1/r^2 (unlike the EM flux).
+
+        Returns
+        -------
+        strain:
+            The strain measured at the detector.
+        snr:
+            The S/N as measured by a detector.
+        """
+
+        chirp_mass = (self.star_mass * self.lens_mass) ** (3 / 5) / (self.star_mass + self.lens_mass) ** (1 / 5)
+        chirp_mass *= 1.989e30  # convert Solar mass to kg
+        freq = 2 / (self.orbital_period * 3600)  # in Hz
+        time_sec = time_yrs * 365.25 * 24 * 3600  # in seconds
+        c = 2.99792458e8  # speed of light in m/s
+        G = 6.67408e-11  # gravitational constant in m^3/kg/s^2
+        distance_m = distance_pc * 3.086e16  # convert parsec to meters
+        strain = 4 * (G * chirp_mass) ** (5 / 3) * (np.pi * freq) ** (2 / 3) / c**4 / distance_m
+
+        # use the LISA noise model
+        sig = lisa_noise_model(freq)
+
+        h = np.sqrt(4 / 5) * strain  # adjust for the all-sky average geometry
+        snr = h / np.sqrt(sig) * np.sqrt(4 * time_sec * freq)
+
+        return strain, snr
 
     def print(self, pars=None, surveys=None):
         """Print a summary of the system parameters."""
@@ -1679,6 +1729,31 @@ def black_body(la, temp, photons=False):  # black body radiation
     return amp / (la ** (5 - photons) * (np.exp(const / (la * temp)) - 1))
 
 
+def lisa_noise_model(freq):
+    """
+    get the LISA noise model at this frequency (or an array of frequencies)
+    ref: https://ui.adsabs.harvard.edu/abs/2019PhRvD.100j4055S/abstract
+
+    Parameters
+    ----------
+    freq: float or ndarray of floats
+        Frequency in Hz.
+
+    Returns
+    -------
+    The noise at this frequency or frequencies.
+
+    """
+    S_one = 5.76e-48 * (1 + (0.4e-3 / freq) ** 2)  # in units of s^-4 Hz^-1 (eq 53)
+    S_two = 3.6e-41  # in units of Hz^-1  (eq 54)
+    f2 = 25e-3
+
+    # using eq 87
+    sigma_h = 1 / 2 * 20 / 3 * (S_one / (2 * np.pi * freq) ** 4 + S_two) * (1 + (freq / f2) ** 2)
+
+    return sigma_h
+
+
 def translate_time_units(units):
     """Give the number of seconds in a given unit of time."""
     d = {
@@ -1801,15 +1876,29 @@ def compact_object_size(mass):
 
 if __name__ == "__main__":
 
+    # let's do the example from ref: https://ui.adsabs.harvard.edu/abs/2019PhRvD.100j4055S/abstract
+    # the monotone binary at Appendix D, page 15
     s = Simulator()
     # s.make_gui()
     s.calculate(
-        star_mass=1.0,
+        star_mass=0.2,
         star_size=None,
         star_type=None,
         star_temp=5778,
-        lens_mass=3.0,
+        lens_mass=0.6,
         lens_type=None,
         inclination=89.0,
-        semimajor_axis=0.1,
+        # semimajor_axis=0.1,
+        orbital_period=415 / 3600,
     )
+    strain, snr = s.syst.get_gravitational_strain(distance_pc=2300, time_yrs=4)
+    f = 2 / (s.syst.orbital_period * 3600)  # frequency in Hz
+    sig = lisa_noise_model(f)
+    h = np.sqrt(4 / 5) * strain
+    print(f"f={f:.2e} Hz, h= {h:.2e}, sig= {sig:.2e}, S/N= {snr:.2f}")
+
+    # f = np.geomspace(1e-4, 1e-1)
+    # s = 2 * np.sqrt(f * lisa_noise_model(f))
+    # plt.figure()
+    # plt.loglog(f, s)
+    # plt.show()  # recreate Figure 4 of the ref

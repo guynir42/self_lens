@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from num2tex import num2tex, configure
 
 from src.transfer_matrix import single_geometry, radial_lightcurve
-from src.simulator import Simulator
+from src.simulator import Simulator, lisa_noise_model
 from src.grid_scan import Grid
 from src.distributions import fetch_distributions, semimajor_axis_distribution
 
@@ -189,6 +189,52 @@ def test_make_astrometry_curves():
     plt.savefig("plots/example_astrometric_shifts.png")
 
 
+def test_make_gravitational_strain_plot(sim):
+    plt.rc("font", size=24)
+    lens_masses = [0.6, 2.0, 10.0]
+    lens_labels = ["WD-WD", "WD-NS", "WD-BH"]
+    markers = ["s", "v", "p"]
+
+    source_mass = 0.6
+    threshold = 0.1  # 10% threshold
+    distance = 1000  # 1kpc
+    time_yrs = 4  # observing time
+
+    a_range = np.geomspace(0.0001, 0.3, 30)
+    mag = np.zeros((len(lens_masses), len(a_range)))
+    strain = np.zeros((len(lens_masses), len(a_range)))
+    freq = np.zeros((len(lens_masses), len(a_range)))
+
+    fig = plt.figure(num=4, figsize=[12, 6])
+    axes = fig.add_axes([0.14, 0.14, 0.82, 0.82])
+
+    for i, m in enumerate(lens_masses):
+        for j, a in enumerate(a_range):
+            sim.calculate(star_mass=source_mass, lens_mass=m, semimajor_axis=a)
+            freq[i, j] = 2 / (3600 * sim.syst.orbital_period)
+            mag[i, j] = np.max(sim.syst.magnifications) - 1
+            strain[i, j], snr = sim.syst.get_gravitational_strain(distance_pc=distance, time_yrs=time_yrs)
+            # do we need the S/N explicitly?
+        label = f"{lens_labels[i]} ({source_mass}$M_\u2609$, {m}$M_\u2609$)"
+        good = mag[i] >= threshold
+        axes.loglog(freq[i, good], strain[i, good], label=label, lw=3.0, marker=markers[i], ms=12.0)
+
+        axes.loglog(freq[i], strain[i], ls=":", lw=2.0, color=axes.lines[-1].get_color())
+
+    time_sec = time_yrs * 365 * 24 * 3600
+    noise = lisa_noise_model(freq[-1])  # arbitrarily choose the frequency range for WD-BH
+    noise = np.sqrt(noise * 5 / 4 * 4 / freq[-1] / time_sec)
+    axes.loglog(freq[-1], noise, label="LISA noise model", ls="--", lw=3.0, color="k")
+
+    axes.set_xlabel("Gravitational wave frequency [Hz]")
+    axes.set_ylabel("Gravitational wave strain")
+    axes.legend(loc="upper right", framealpha=0.0)
+
+    # save the plots
+    plt.savefig("plots/gravitational_strain.pdf")
+    plt.savefig("plots/gravitational_strain.png")
+
+
 def test_make_example_system_wd_wd(sim):
     sim.calculate(
         star_mass=0.3,
@@ -198,9 +244,12 @@ def test_make_example_system_wd_wd(sim):
         star_temp=8000,
         lens_temp=4000,
     )
-    sim.syst.plot(font_size=24)
+    sim.syst.plot(font_size=24, distance_pc=100)
 
     plt.gcf().set_size_inches([16, 8])
+
+    strain, snr = sim.syst.get_gravitational_strain()
+    print(f"f= {2 / (3600 * sim.syst.orbital_period)}, strain= {strain:.2g}, S/N= {snr:.2g}")
 
     # save the plots
     plt.savefig("plots/example_wd_wd_system.pdf")
@@ -216,7 +265,7 @@ def test_make_example_system_eclipse(sim):
         star_temp=8000,
         lens_temp=4000,
     )
-    sim.syst.plot(font_size=24)
+    sim.syst.plot(font_size=24, distance_pc=100)
 
     plt.gcf().set_size_inches([16, 8])
 
@@ -234,7 +283,7 @@ def test_make_example_system_wd_ns(sim):
         star_temp=8000,
         lens_temp=4000,
     )
-    sim.syst.plot(font_size=24)
+    sim.syst.plot(font_size=24, distance_pc=100)
 
     plt.gcf().set_size_inches([16, 8])
 
@@ -252,7 +301,7 @@ def test_make_example_system_wd_bh(sim):
         star_temp=8000,
         lens_temp=4000,
     )
-    sim.syst.plot(font_size=24)
+    sim.syst.plot(font_size=24, distance_pc=100)
 
     plt.gcf().set_size_inches([16, 8])
 
