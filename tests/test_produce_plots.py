@@ -215,15 +215,14 @@ def test_make_gravitational_strain_plot(sim):
             mag[i, j] = np.max(sim.syst.magnifications) - 1
             strain[i, j], snr = sim.syst.get_gravitational_strain(distance_pc=distance, time_yrs=time_yrs)
             # do we need the S/N explicitly?
+
         label = f"{lens_labels[i]} ({source_mass}$M_\u2609$, {m}$M_\u2609$)"
         good = mag[i] >= threshold
         axes.loglog(freq[i, good], strain[i, good], label=label, lw=3.0, marker=markers[i], ms=12.0)
 
         axes.loglog(freq[i], strain[i], ls=":", lw=2.0, color=axes.lines[-1].get_color())
 
-    time_sec = time_yrs * 365 * 24 * 3600
-    noise = lisa_noise_model(freq[-1])  # arbitrarily choose the frequency range for WD-BH
-    noise = np.sqrt(noise * 5 / 4 * 4 / freq[-1] / time_sec)
+    noise = np.sqrt(lisa_noise_model(freq[-1]))  # arbitrarily choose the frequency range for WD-BH
     axes.loglog(freq[-1], noise, label="LISA noise model", ls="--", lw=3.0, color="k")
 
     axes.set_xlabel("Gravitational wave frequency [Hz]")
@@ -1175,7 +1174,7 @@ def test_plot_semimajor_axis_population():
 
     ax3 = axes.twinx()
     ax3.set_ylabel("Fraction of all DWDs", fontsize=14)
-    ax3.set_ylim([y / space_density for y in axes.get_ylim()])
+    ax3.set_ylim([y / space_density / binary_fraction for y in axes.get_ylim()])
     ax3.tick_params(axis="y", labelsize=12)
     ax3.set_yscale("log")
 

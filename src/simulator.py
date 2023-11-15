@@ -1559,12 +1559,11 @@ class System:
         G = 6.67408e-11  # gravitational constant in m^3/kg/s^2
         distance_m = distance_pc * 3.086e16  # convert parsec to meters
         strain = 4 * (G * chirp_mass) ** (5 / 3) * (np.pi * freq) ** (2 / 3) / c**4 / distance_m
+        strain *= np.sqrt(4 / 5)  # adjust for the all-sky average geometry
+        strain *= np.sqrt(4 * time_sec * freq)  # adjust for the observing time
 
-        # use the LISA noise model
-        sig = lisa_noise_model(freq)
-
-        h = np.sqrt(4 / 5) * strain  # adjust for the all-sky average geometry
-        snr = h / np.sqrt(sig) * np.sqrt(4 * time_sec * freq)
+        # use the LISA noise model to get the S/N
+        snr = strain / np.sqrt(lisa_noise_model(freq))
 
         return strain, snr
 
