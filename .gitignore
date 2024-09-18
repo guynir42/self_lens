@@ -1,9 +1,12 @@
 # project specific stuff
-saved/*
+saved/
 scripts/*.npz
 scripts/*.txt
-plots/*
-archive/*
+plots/
+tests/plots/
+tests/test_data
+archive/
+submission/
 .idea
 
 # Byte-compiled / optimized / DLL files

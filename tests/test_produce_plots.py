@@ -1185,3 +1185,55 @@ def test_plot_semimajor_axis_population():
     # save the plot
     plt.savefig("plots/semimajor_axis_population.pdf")
     plt.savefig("plots/semimajor_axis_population.png")
+
+
+def test_show_gravitational_decay():
+    fig, axes = plt.subplots(num=11, figsize=[8, 6])
+    g = Grid()
+    a1 = g.gravitational_semi_major_axis(0.6, 0.6)
+    print(f"sma for DWD: {a1}")
+    s = Simulator()
+    s.calculate(lens_mass=0.6, star_mass=0.6, semimajor_axis=a1, lens_temp=8000, star_temp=8000)
+    print(f"Period: {s.syst.period_string()}")
+
+    a2 = g.gravitational_semi_major_axis(0.6, 10)
+    print(f"sma for WD-BH: {a2}")
+    s.calculate(lens_mass=10, star_mass=0.6, semimajor_axis=a2, lens_temp=8000, star_temp=8000)
+    print(f"Period: {s.syst.period_string()}")
+
+    a_values = np.geomspace(1e-4, 50, 1000)
+    wd_merge_times = []
+    bh_merge_times = []
+    for a in a_values:
+        s.calculate(lens_mass=0.6, semimajor_axis=a)
+        wd_merge_times.append(s.syst.merger_time())
+
+        s.calculate(lens_mass=10, semimajor_axis=a)
+        bh_merge_times.append(s.syst.merger_time())
+
+    axes.plot(a_values, wd_merge_times, "b-", label="WD-WD")
+    axes.plot(a_values, bh_merge_times, "k--", label="WD-BH")
+
+    axes.set_xscale("log")
+    axes.set_yscale("log")
+
+    axes.set_xlabel("Semimajor axis [AU]", fontsize=16)
+    axes.set_ylabel("Merger time [Gyr]", fontsize=16)
+    axes.tick_params(axis="x", labelsize=12)
+    axes.tick_params(axis="y", labelsize=12)
+
+    # days (using Kepler's law) assuming a 0.6 solar mass WD with a 0.6 WD
+    period = lambda x: x ** (3 / 2) * 365.25 / np.sqrt(1.2)
+    ax2 = axes.twiny()
+    ax2.set_xlabel("WD-WD Period [days]", fontsize=14)
+    ax2.set_xlim([period(x) for x in axes.get_xlim()])
+    ax2.tick_params(axis="x", labelsize=12)
+    ax2.set_xscale("log")
+
+    axes.legend(loc="upper left", fontsize=14, framealpha=0)
+
+    plt.show()
+
+    # save the plot
+    plt.savefig("plots/merger_times.pdf")
+    plt.savefig("plots/merger_times.png")
