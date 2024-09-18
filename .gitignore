@@ -3,7 +3,6 @@ saved/
 scripts/*.npz
 scripts/*.txt
 plots/
-tests/plots/
 tests/test_data
 archive/
 submission/
